@@ -21,10 +21,18 @@ public class Program {
         web = new HtmlWeb();
         web.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
         handler = new HttpClientHandler() {
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+            UseCookies = true,
+            CookieContainer = new CookieContainer()
         };
         client = new HttpClient(handler);
         client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0");
+        client.DefaultRequestHeaders.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8");
+        client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
+        client.DefaultRequestHeaders.Add("Connection", "keep-alive");
+        client.DefaultRequestHeaders.ConnectionClose = false;
+
+        client.DefaultRequestVersion = HttpVersion.Version20;
 
         app.MapGet("/hello", () => "Hello World!");
 
@@ -36,6 +44,7 @@ public class Program {
         });
 
         app.MapGet("/randsong", (HttpContext context, string folder = "rand") => {
+            Console.WriteLine("Randsong from " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
             string[] folderPaths = {
                 "C:\\Users\\Kiwian\\Music\\“Real” music I guess",
                 "C:\\Users\\Kiwian\\Music\\Kiwian's Listening",
@@ -95,7 +104,8 @@ public class Program {
             return Results.NotFound();
         });
 
-        app.MapGet("/getao3storyid", async (string storyTitle) => {
+        app.MapGet("/getao3storyid", async (HttpContext context, string storyTitle) => {
+            Console.WriteLine("Getao3storyid from " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
             string searchUrl = "https://archiveofourown.org/works/search?work_search[title]=" + Uri.EscapeDataString(storyTitle);
 
             HtmlNodeCollection workNodes = null;
@@ -134,7 +144,8 @@ public class Program {
             return Results.Json(stories);
         });
 
-        app.MapGet("/getao3text", async (int storyID, int page) => {
+        app.MapGet("/getao3text", async (HttpContext context, int storyID, int page) => {
+            Console.WriteLine("Getao3text from " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
             string url = "https://archiveofourown.org/works/" + storyID + "/chapters/";
 
             string navUrl = "https://archiveofourown.org/works/" + storyID + "/navigate";
