@@ -27,3 +27,9 @@ Accept: application/json
 
 GET {{kiwiapi_HostAddress}}/getao3text
 Accept: application/json
+
+##
+
+GET {{kiwiapi_HostAddress}}/randstuck
+Accept: image/gif
+
