@@ -11,6 +11,7 @@ public class Program {
     private static SocketsHttpHandler? handler;
     private static HttpClient? client;
     public static SqliteConnection? database;
+    private record RoomResult(string roomName, int roomID);
 
     public static void Main(string[] args) {
         string connectionString = "Data Source=protocall.db";
@@ -365,10 +366,48 @@ public class Program {
             return result == null ? Results.Text("-1") : Results.Ok(result);
         });
 
+        app.MapGet("/request_roomSearch", async (string targetName, string userID, string userSecret) => {
+            string realSecret = await ProtoCall.GetUserSecret(userID);
+            if (realSecret != userSecret) {
+                Console.WriteLine("Passed secret did not match real secret of " + realSecret);
+                return Results.Text("-1");
+            }
+
+            SqliteCommand queryCommand = database!.CreateCommand();
+            queryCommand.CommandText = "SELECT id, name FROM rooms LEFT JOIN roomAccess ON id = room_id AND user_id = $userID WHERE name LIKE $targetName AND name != 'HomeRoom' AND (privacy = 'PUBLIC' OR (privacy = 'PRIVATE' AND access_level >= 0))";
+            queryCommand.Parameters.AddWithValue("$targetName", "%" + targetName + "%");
+            queryCommand.Parameters.AddWithValue("$userID", userID);
+            SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            List<RoomResult> results = new();
+            while (await reader.ReadAsync()) {
+                results.Add(new RoomResult(reader.GetString(1), reader.GetInt32(0)));
+            }
+            reader.Dispose();
+            queryCommand.Dispose();
+
+            return Results.Ok(results);
+        });
+
         app.MapGet("/request_accessLevel", async (string userID, int roomID) => {
             return Results.Ok(new {
                 accessLevel = ProtoCall.UserAccessLevelInRoom(userID, roomID)
             });
+        });
+
+        app.MapGet("/request_usersWithAccessLevel", async (int accessLevel, int roomID) => {
+            SqliteCommand queryCommand = database!.CreateCommand();
+            queryCommand.CommandText = "SELECT user_id FROM roomAccess WHERE room_id = $roomID AND access_level = $accessLevel";
+            queryCommand.Parameters.AddWithValue("$roomID", roomID);
+            queryCommand.Parameters.AddWithValue("$accessLevel", accessLevel);
+            SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            List<string> results = new();
+            while (await reader.ReadAsync()) {
+                results.Add(reader.GetString(0));
+            }
+            reader.Dispose();
+            queryCommand.Dispose();
+
+            return Results.Ok(results);
         });
 
         app.MapGet("/request_deviceInfo", (HttpContext context) => {

@@ -91,12 +91,19 @@ public class ProtoCall : Hub {
         }
 
         SqliteCommand roomCommand = Program.database!.CreateCommand();
-        roomCommand.CommandText = "INSERT INTO rooms (name, author_id, admin_ids) VALUES ($roomName, $authorID, $adminIDs); SELECT last_insert_rowid();";
+        roomCommand.CommandText = "INSERT INTO rooms (name, author_id) VALUES ($roomName, $authorID); SELECT last_insert_rowid();";
         roomCommand.Parameters.AddWithValue("$roomName", roomName);
         roomCommand.Parameters.AddWithValue("$authorID", userID);
-        roomCommand.Parameters.AddWithValue("$adminIDs", userID + ",");
         int roomID = (int)(long)roomCommand.ExecuteScalar()!;
         roomCommand.Dispose();
+
+        SqliteCommand accessCommand = Program.database!.CreateCommand();
+        accessCommand.CommandText = "INSERT INTO roomAccess (room_id, user_id, access_level) VALUES ($roomID, $userID, $accessLevel)";
+        accessCommand.Parameters.AddWithValue("$roomID", roomID);
+        accessCommand.Parameters.AddWithValue("$userID", userID);
+        accessCommand.Parameters.AddWithValue("$accessLevel", 2);
+        accessCommand.ExecuteNonQuery();
+        accessCommand.Dispose();
 
         await Clients.Caller.SendAsync("push_recieveRoom", roomName, roomID);
     }
