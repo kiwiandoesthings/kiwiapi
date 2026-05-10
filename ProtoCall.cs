@@ -5,6 +5,47 @@ using Microsoft.Data.Sqlite;
 
 public class ProtoCall : Hub {
     public record MessagesData(string authorID, string content, int messageIndex, string messageTimestamp);
+    private Dictionary<string, bool> userConnections = new();
+
+    public override async Task OnConnectedAsync() {
+        string? userID = Context.GetHttpContext()!.Request.Query["userID"];
+        string? userSecret = Context.GetHttpContext()!.Request.Query["userSecret"];
+        if (userID == null || userSecret == null) {
+            return;
+        }
+        string realSecret = await GetUserSecret(userID);
+        if (realSecret != userSecret) {
+            Console.WriteLine("Passed secret did not match real secret of " + realSecret);
+            await Clients.Caller.SendAsync("push_serverMessage", "Server could not authenticate your message, please clear your cookies and log in again");
+            return;
+        }
+
+        userConnections[userID] = true;
+
+        Clients.All.SendAsync("push_userStatus", userID, true);
+
+        await base.OnConnectedAsync();
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception) {
+        string? userID = Context.GetHttpContext()!.Request.Query["userID"];
+        string? userSecret = Context.GetHttpContext()!.Request.Query["userSecret"];
+        if (userID == null || userSecret == null) {
+            return;
+        }
+        string realSecret = await GetUserSecret(userID);
+        if (realSecret != userSecret) {
+            Console.WriteLine("Passed secret did not match real secret of " + realSecret);
+            await Clients.Caller.SendAsync("push_serverMessage", "Server could not authenticate your message, please clear your cookies and log in again");
+            return;
+        }
+
+        userConnections[userID] = false;
+
+        Clients.All.SendAsync("push_userStatus", userID, false);
+
+        await base.OnDisconnectedAsync(exception);
+    }
 
     public async Task push_sendMessage(string userID, string userSecret, string message, string messageTimestamp, int roomID) {
         Console.WriteLine("Got message from userID: " + userID + " with secret: " + userSecret + " with content: \"" + message + "\"");
@@ -79,15 +120,15 @@ public class ProtoCall : Hub {
         reader.Dispose();
     }
 
-    public async Task push_createRoom(string roomName, string userID, string userSecret) {
+    public async Task<int> push_createRoom(string roomName, string userID, string userSecret, string overrideNameLength = "") {
         string realSecret = await GetUserSecret(userID);
         if (realSecret != userSecret) {
             Console.WriteLine("Passed secret did not match real secret of " + realSecret);
             await Clients.Caller.SendAsync("push_serverMessage", "Server could not authenticate your request, please clear your cookies and log in again");
-            return;
+            return -1;
         }
-        if (roomName.Length > 25) {
-            return;
+        if (roomName.Length > 25 && overrideNameLength != "Kiwian's Super Duper Secret String of Destruction") {
+            return -1;
         }
 
         SqliteCommand roomCommand = Program.database!.CreateCommand();
@@ -106,6 +147,20 @@ public class ProtoCall : Hub {
         accessCommand.Dispose();
 
         await Clients.Caller.SendAsync("push_recieveRoom", roomName, roomID);
+
+        return 0;
+    }
+
+    public async Task push_createUserRoom(string authorID, string authorSecret, string otherID) {
+        if (await push_createRoom(authorID + " " + otherID, authorID, "Kiwian's Super Duper Secret String of Destruction") != 0) {
+            Console.WriteLine("Error while making DM");
+            await Clients.Caller.SendAsync("push_serverMessage", "Server encountered an error while trying to create the DM room, please clear your cookies and log in again.");
+            return;
+        }
+
+        SqliteCommand dmCommand = Program.database!.CreateCommand();
+        dmCommand.CommandText = "INSERT INTO userRooms (room_id, user_1_id, user_2_id) VALUES ($roomID, $authorID, $otherID)";
+        dmCommand.Parameters.AddWithValue("$roomID", -1);
     }
 
     public async Task push_setRoomPrivacy(int roomID, string newPrivacy, string userID, string userSecret) {

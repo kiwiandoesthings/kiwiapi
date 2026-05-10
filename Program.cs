@@ -138,7 +138,7 @@ public class Program {
 
             HtmlNodeCollection workNodes = null;
             for (int i = 0; i < 10; i++) {
-                Console.WriteLine("Requesting results for \"" + storyTitle + "\" for the " + (i + 1) + " try");
+                Console.WriteLine("Requesting results for \"" + Uri.EscapeDataString(storyTitle) + "\" for the " + (i + 1) + " try");
                 HttpResponseMessage response = await client.GetAsync(searchUrl);
                 Console.WriteLine("Got response");
                 string html = await response.Content.ReadAsStringAsync();
@@ -182,10 +182,14 @@ public class Program {
             string url = "https://archiveofourown.org/works/" + storyID + "/chapters/";
 
             string navUrl = "https://archiveofourown.org/works/" + storyID + "/navigate";
+            Console.WriteLine("About to get web page");
             HttpResponseMessage navResponse = await client.GetAsync(navUrl);
+            Console.WriteLine("Got web page");
             string navHtml = await navResponse.Content.ReadAsStringAsync();
+            Console.WriteLine("Parsed as string");
             HtmlDocument navDoc = new HtmlDocument();
             navDoc.LoadHtml(navHtml);
+            Console.WriteLine("Loaded HTML document");
 
             HtmlNode contentNode = null;
             string title = "";
