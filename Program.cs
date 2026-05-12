@@ -14,12 +14,12 @@ public class Program {
     private record RoomResult(string roomName, int roomID);
 
     public static void Main(string[] args) {
-        string connectionString = "Data Source=protocall.db";
+        string connectionString = "Data Source=" + "C:\\Users\\Kiwian\\Downloads\\Github Repos\\kiwiapi\\protocall.db";
         database = new SqliteConnection(connectionString);
         database.Open();
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-
+        builder.WebHost.UseUrls("http://localhost:5201", "https://localhost:7164");
         builder.Services.AddControllers();
         builder.Services.AddOpenApi();
         builder.Services.AddSignalR(options => {
@@ -47,7 +47,13 @@ public class Program {
                 EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13
             },
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-            MaxConnectionsPerServer = 10
+            MaxConnectionsPerServer = 10,
+            ConnectCallback = async (context, cancellationToken) => {
+                var entry = await Dns.GetHostEntryAsync(context.DnsEndPoint.Host, System.Net.Sockets.AddressFamily.InterNetwork);
+                var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+                await socket.ConnectAsync(entry.AddressList, context.DnsEndPoint.Port, cancellationToken);
+                return new System.Net.Sockets.NetworkStream(socket, true);
+            }
         };
 
         client = new HttpClient(handler);
@@ -58,6 +64,11 @@ public class Program {
         client.DefaultRequestHeaders.Add("Referer", "https://archiveofourown.org/");
         client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate, br");
         client.DefaultRequestHeaders.Add("Connection", "keep-alive");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "document");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Mode", "navigate");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Site", "none");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-User", "?1");
+        client.DefaultRequestHeaders.Add("Upgrade-Insecure-Requests", "1");
         client.DefaultRequestHeaders.ConnectionClose = false;
 
         client.DefaultRequestVersion = HttpVersion.Version11;
@@ -199,14 +210,19 @@ public class Program {
                 HtmlNodeCollection chapterLinks = navDoc.DocumentNode.SelectNodes("//ol[contains(@class,'index')]//li/a");
 
                 string finalUrl = "";
-
                 if (chapterLinks != null && page > 0 && page <= chapterLinks.Count) {
-                    finalUrl = "https://archiveofourown.org" + chapterLinks[page - 1].GetAttributeValue("href", "") + "?view_adult=true";
+                    string href = chapterLinks[page - 1].GetAttributeValue("href", "");
+                    finalUrl = "https://archiveofourown.org" + href + "?view_adult=true";
                 } else {
-                    finalUrl = "https://archiveofourown.org/works/" + storyID + "?view_adult=true";
+                    finalUrl = $"https://archiveofourown.org/works/{storyID}?view_adult=true";
                 }
 
                 HttpResponseMessage response = await client.GetAsync(finalUrl);
+                if (response.StatusCode == HttpStatusCode.TooManyRequests) {
+                    Console.WriteLine("Rate limited by AO3. Waiting much longer...");
+                    await Task.Delay(5000);
+                    continue;
+                }
                 string html = await response.Content.ReadAsStringAsync();
                 if (!response.IsSuccessStatusCode) {
                     continue;
