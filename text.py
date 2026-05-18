@@ -13,7 +13,8 @@ def main():
         print(json.dumps({
             "title": work.title,    
             "chapter": page + 1,
-            "content": work.chapters[page].text
+            "content": work.chapters[page].text,
+            "chapterCount": work.nchapters
         }))
     except Exception as e:
         print(json.dumps({"error": str(e)}))

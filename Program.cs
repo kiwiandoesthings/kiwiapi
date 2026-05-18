@@ -144,7 +144,7 @@ public class Program {
             return Results.NotFound();
         });
 
-        app.MapGet("/getao3storyid", async (HttpContext context, string storyTitle) => {
+        app.MapGet("/getao3storyid", async (HttpContext context, string storyTitle, int page) => {
             Console.WriteLine("Getao3storyid from " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
             return GetAo3ApiResponse("search", [storyTitle, 0.ToString()]);
         });
