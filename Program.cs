@@ -6,6 +6,7 @@ using Microsoft.Data.Sqlite;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Diagnostics;
 
 public class Program {
     private static SocketsHttpHandler? handler;
@@ -145,110 +146,12 @@ public class Program {
 
         app.MapGet("/getao3storyid", async (HttpContext context, string storyTitle) => {
             Console.WriteLine("Getao3storyid from " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
-            string searchUrl = "https://archiveofourown.org/works/search?work_search%5Bquery%5D=&work_search%5Btitle%5D=" + Uri.EscapeDataString(storyTitle) + "&work_search%5Bcreators%5D=&work_search%5Brevised_at%5D=&work_search%5Bcomplete%5D=&work_search%5Bcrossover%5D=&work_search%5Bsingle_chapter%5D=0&work_search%5Bword_count%5D=&work_search%5Blanguage_id%5D=&work_search%5Bfandom_names%5D=&work_search%5Brating_ids%5D=&work_search%5Bcharacter_names%5D=&work_search%5Brelationship_names%5D=&work_search%5Bfreeform_names%5D=&work_search%5Bhits%5D=&work_search%5Bkudos_count%5D=&work_search%5Bcomments_count%5D=&work_search%5Bbookmarks_count%5D=&work_search%5Bsort_column%5D=_score&work_search%5Bsort_direction%5D=desc&commit=Search";
-
-            HtmlNodeCollection workNodes = null;
-            for (int i = 0; i < 10; i++) {
-                Console.WriteLine("Requesting results for \"" + Uri.EscapeDataString(storyTitle) + "\" for the " + (i + 1) + " try");
-                HttpResponseMessage response = await client.GetAsync(searchUrl);
-                Console.WriteLine("Got response");
-                string html = await response.Content.ReadAsStringAsync();
-                Console.WriteLine("Got response HTML string");
-                HtmlDocument doc = new HtmlDocument();
-                doc.LoadHtml(html);
-                Console.WriteLine("Loaded HTML string into HTML context");
-                workNodes = doc.DocumentNode.SelectNodes("//li[contains(@class, 'work')]");
-
-                if (workNodes != null) {
-                    break;
-                }
-                Console.WriteLine("Found empty response");
-                await Task.Delay(1500);
-            }
-
-            if (workNodes == null) {
-                return Results.BadRequest("Failed to search for stories 10 times. If the search continues to fail, please contact @KiwianDoesThings on Discord.");
-            }
-
-            Dictionary<string, string> stories = new();
-
-            foreach (HtmlNode work in workNodes) {
-                HtmlNode titleNode = work.SelectSingleNode(".//h4[@class='heading']/a[contains(@href, '/works/')]");
-                HtmlNode authorNode = work.SelectSingleNode(".//h4[@class='heading']/a[contains(@href, '/users/')]");
-
-                string title = WebUtility.HtmlDecode(titleNode?.InnerText.Trim()) ?? "Unknown Title";
-                string author = WebUtility.HtmlDecode(authorNode?.InnerText.Trim()) ?? "Anonymous";
-                string id = titleNode?.GetAttributeValue("href", "").Replace("/works/", "") ?? "0";
-
-                if (!stories.ContainsKey(id)) {
-                    stories.Add(id, title + ", by " + author);
-                }
-            }
-
-            return Results.Json(stories);
+            return GetAo3ApiResponse("search", [storyTitle, 0.ToString()]);
         });
 
         app.MapGet("/getao3text", async (HttpContext context, int storyID, int page) => {
             Console.WriteLine("Getao3text from " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
-            string url = "https://archiveofourown.org/works/" + storyID + "/chapters/";
-
-            string navUrl = "https://archiveofourown.org/works/" + storyID + "/navigate";
-            Console.WriteLine("About to get web page");
-            HttpResponseMessage navResponse = await client.GetAsync(navUrl);
-            Console.WriteLine("Got web page");
-            string navHtml = await navResponse.Content.ReadAsStringAsync();
-            Console.WriteLine("Parsed as string");
-            HtmlDocument navDoc = new HtmlDocument();
-            navDoc.LoadHtml(navHtml);
-            Console.WriteLine("Loaded HTML document");
-
-            HtmlNode contentNode = null;
-            string title = "";
-            for (int i = 0; i < 10; i++) {
-                Console.WriteLine("Trying to get story data for story with id " + storyID + " at chapter " + page + " for the " + (i + 1) + " try");
-
-                HtmlNodeCollection chapterLinks = navDoc.DocumentNode.SelectNodes("//ol[contains(@class,'index')]//li/a");
-
-                string finalUrl = "";
-                if (chapterLinks != null && page > 0 && page <= chapterLinks.Count) {
-                    string href = chapterLinks[page - 1].GetAttributeValue("href", "");
-                    finalUrl = "https://archiveofourown.org" + href + "?view_adult=true";
-                } else {
-                    finalUrl = $"https://archiveofourown.org/works/{storyID}?view_adult=true";
-                }
-
-                HttpResponseMessage response = await client.GetAsync(finalUrl);
-                if (response.StatusCode == HttpStatusCode.TooManyRequests) {
-                    Console.WriteLine("Rate limited by AO3. Waiting much longer...");
-                    await Task.Delay(5000);
-                    continue;
-                }
-                string html = await response.Content.ReadAsStringAsync();
-                if (!response.IsSuccessStatusCode) {
-                    continue;
-                }
-                HtmlDocument doc = new HtmlDocument();
-                doc.LoadHtml(html);
-
-                title = WebUtility.HtmlDecode(doc.DocumentNode.SelectSingleNode("//h2[@class='title heading']")?.InnerText?.Trim() ?? "Unknown");
-
-                contentNode = doc.DocumentNode.SelectSingleNode("//div[@id='workskin']//div[contains(@class, 'userstuff')]");
-
-                if (contentNode != null) {
-                    break;
-                }
-                await Task.Delay(1500);
-            }
-
-            if (contentNode == null) {
-                return Results.NotFound("Failed to get story content after 10 tries. If the issue persists, please contact @KiwianDoesThings on Discord");
-            }
-
-            return Results.Json(new {
-                Title = title,
-                Chapter = page,
-                Content = contentNode.InnerHtml
-            });
+            return GetAo3ApiResponse("text", [storyID.ToString(), page.ToString()]);
         });
 
         app.MapGet("/randstuck", async (int act = -1) => {
@@ -455,5 +358,28 @@ public class Program {
 
     public static bool ValidHex(string toCheck) {
         return Regex.IsMatch(toCheck, @"^#?([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$");
+    }
+
+    public static IResult GetAo3ApiResponse(string file, string[] args) {
+        Console.WriteLine("experiment");
+        ProcessStartInfo start = new ProcessStartInfo();
+        start.FileName = "python";
+        string arguments = file + ".py ";
+        foreach (string argument in args) {
+            arguments += argument + " ";
+        }
+        start.Arguments = arguments;
+        start.UseShellExecute = false;
+        start.RedirectStandardOutput = true;
+        start.CreateNoWindow = true;
+        start.StandardOutputEncoding = Encoding.UTF8;
+
+        using (Process? process = Process.Start(start)) {
+            using (StreamReader reader = process!.StandardOutput) {
+                string result = reader.ReadToEnd();
+                Console.WriteLine("end experiment");
+                return Results.Content(result, "application/json");
+            }
+        }
     }
 }
