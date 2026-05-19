@@ -365,7 +365,7 @@ public class Program {
         Console.WriteLine("experiment");
         ProcessStartInfo start = new ProcessStartInfo();
         start.FileName = "python";
-        string arguments = file + ".py ";
+        string arguments = "\"C:\\Users\\Kiwian\\Downloads\\Github Repos\\kiwiapi\\" + file + ".py\" ";
         foreach (string argument in args) {
             arguments += "\"" + argument + "\" ";
         }
