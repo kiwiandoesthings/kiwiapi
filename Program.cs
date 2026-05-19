@@ -146,7 +146,8 @@ public class Program {
 
         app.MapGet("/getao3storyid", async (HttpContext context, string storyTitle, int page) => {
             Console.WriteLine("Getao3storyid from " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
-            return GetAo3ApiResponse("search", [storyTitle, 0.ToString()]);
+            Console.WriteLine(storyTitle + "  " + page);
+            return GetAo3ApiResponse("search", [storyTitle, page.ToString()]);
         });
 
         app.MapGet("/getao3text", async (HttpContext context, int storyID, int page) => {
@@ -366,7 +367,7 @@ public class Program {
         start.FileName = "python";
         string arguments = file + ".py ";
         foreach (string argument in args) {
-            arguments += argument + " ";
+            arguments += "\"" + argument + "\" ";
         }
         start.Arguments = arguments;
         start.UseShellExecute = false;
