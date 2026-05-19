@@ -15,7 +15,7 @@ def main():
         for result in search.results:
             storyList.append({
                 "id": result.id,
-                "info": result.title
+                "info": result.title + ", by " + result.author
             })
         print(json.dumps(storyList))
     except Exception as e:
