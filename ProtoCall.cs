@@ -9,20 +9,22 @@ public class ProtoCall : Hub {
 
     public override async Task OnConnectedAsync() {
         string? userID = Context.GetHttpContext()!.Request.Query["userID"];
-        string? userSecret = Context.GetHttpContext()!.Request.Query["userSecret"];
-        if (userID == null || userSecret == null) {
+        string? userSecret = Context.GetHttpContext()!.Request.Cookies["userSecret"];
+        if (string.IsNullOrEmpty(userID) || string.IsNullOrEmpty(userSecret)) {
+            Context.Abort();
             return;
         }
-        string realSecret = await GetUserSecret(userID);
-        if (realSecret != userSecret) {
-            Console.WriteLine("Passed secret did not match real secret of " + realSecret);
-            await Clients.Caller.SendAsync("push_serverMessage", "Server could not authenticate your message, please clear your cookies and log in again");
-            return;
+
+        bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "connection");
+        if (error) {
+            Context.Abort();
+			Program.LogBadUserSecret(userID, userSecret);
+			return;
         }
 
         userConnections[userID] = true;
 
-        Clients.All.SendAsync("push_userStatus", userID, true);
+        await Clients.All.SendAsync("push_userStatus", userID, true);
 
         await base.OnConnectedAsync();
     }
@@ -33,16 +35,16 @@ public class ProtoCall : Hub {
         if (userID == null || userSecret == null) {
             return;
         }
-        string realSecret = await GetUserSecret(userID);
-        if (realSecret != userSecret) {
-            Console.WriteLine("Passed secret did not match real secret of " + realSecret);
-            await Clients.Caller.SendAsync("push_serverMessage", "Server could not authenticate your message, please clear your cookies and log in again");
-            return;
-        }
 
-        userConnections[userID] = false;
+		bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "connection");
+		if (error) {
+			Program.LogBadUserSecret(userID, userSecret);
+			return;
+		}
 
-        Clients.All.SendAsync("push_userStatus", userID, false);
+		userConnections[userID] = false;
+
+        await Clients.All.SendAsync("push_userStatus", userID, false);
 
         await base.OnDisconnectedAsync(exception);
     }
@@ -50,14 +52,13 @@ public class ProtoCall : Hub {
     public async Task push_sendMessage(string userID, string userSecret, string message, string messageTimestamp, int roomID) {
         Console.WriteLine("Got message from userID: " + userID + " with secret: " + userSecret + " with content: \"" + message + "\"");
 
-        string realSecret = await GetUserSecret(userID);
-        if (realSecret != userSecret) {
-            Console.WriteLine("Passed secret did not match real secret of " + realSecret);
-            await Clients.Caller.SendAsync("push_serverMessage", "Server could not authenticate your message, please clear your cookies and log in again");
+		bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "message");
+		if (error) {
+            Program.LogBadUserSecret(userID, userSecret);
             return;
-        }
+		}
 
-        if (await UserAccessLevelInRoom(userID, roomID) < 0) {
+		if (await Program.UserAccessLevelInRoom(userID, roomID) < 0) {
             await Clients.Caller.SendAsync("push_serverMessage", "You do not have access to this room!");
             return;
         }
@@ -67,7 +68,7 @@ public class ProtoCall : Hub {
         idCommand.Parameters.AddWithValue("$roomID", roomID);
         int localID = (int)(long)idCommand.ExecuteScalar()!;
         idCommand.Dispose();
-        
+
         SqliteCommand sendCommand = Program.database!.CreateCommand();
         sendCommand.CommandText = "INSERT INTO messages (content, author_id, local_id, room_id, created_at) VALUES ($message, $userID, $localID, $roomID, $messageTimestamp); SELECT last_insert_rowid();";
         sendCommand.Parameters.AddWithValue("$message", message);
@@ -85,7 +86,13 @@ public class ProtoCall : Hub {
     }
 
     public async Task push_messageRequest(int messageIndex, int messageCount, string userID, string userSecret, int roomID) {
-        if (await UserAccessLevelInRoom(userID, roomID) < 0) {
+		bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "request");
+		if (error) {
+			Program.LogBadUserSecret(userID, userSecret);
+			return;
+		}
+
+		if (await Program.UserAccessLevelInRoom(userID, roomID) < 0) {
             await Clients.Caller.SendAsync("push_serverMessage", "You do not have access to this room!");
             return;
         }
@@ -118,113 +125,5 @@ public class ProtoCall : Hub {
         await Clients.Caller.SendAsync("push_recieveMessages", messages);
         getCommand.Dispose();
         reader.Dispose();
-    }
-
-    public async Task<int> push_createRoom(string roomName, string userID, string userSecret, string overrideNameLength = "") {
-        string realSecret = await GetUserSecret(userID);
-        if (realSecret != userSecret) {
-            Console.WriteLine("Passed secret did not match real secret of " + realSecret);
-            await Clients.Caller.SendAsync("push_serverMessage", "Server could not authenticate your request, please clear your cookies and log in again");
-            return -1;
-        }
-        if (roomName.Length > 25 && overrideNameLength != "Kiwian's Super Duper Secret String of Destruction") {
-            return -1;
-        }
-
-        SqliteCommand roomCommand = Program.database!.CreateCommand();
-        roomCommand.CommandText = "INSERT INTO rooms (name, author_id) VALUES ($roomName, $authorID); SELECT last_insert_rowid();";
-        roomCommand.Parameters.AddWithValue("$roomName", roomName);
-        roomCommand.Parameters.AddWithValue("$authorID", userID);
-        int roomID = (int)(long)roomCommand.ExecuteScalar()!;
-        roomCommand.Dispose();
-
-        SqliteCommand accessCommand = Program.database!.CreateCommand();
-        accessCommand.CommandText = "INSERT INTO roomAccess (room_id, user_id, access_level) VALUES ($roomID, $userID, $accessLevel)";
-        accessCommand.Parameters.AddWithValue("$roomID", roomID);
-        accessCommand.Parameters.AddWithValue("$userID", userID);
-        accessCommand.Parameters.AddWithValue("$accessLevel", 2);
-        accessCommand.ExecuteNonQuery();
-        accessCommand.Dispose();
-
-        await Clients.Caller.SendAsync("push_recieveRoom", roomName, roomID);
-
-        return 0;
-    }
-
-    public async Task push_createUserRoom(string authorID, string authorSecret, string otherID) {
-        if (await push_createRoom(authorID + " " + otherID, authorID, "Kiwian's Super Duper Secret String of Destruction") != 0) {
-            Console.WriteLine("Error while making DM");
-            await Clients.Caller.SendAsync("push_serverMessage", "Server encountered an error while trying to create the DM room, please clear your cookies and log in again.");
-            return;
-        }
-
-        SqliteCommand dmCommand = Program.database!.CreateCommand();
-        dmCommand.CommandText = "INSERT INTO userRooms (room_id, user_1_id, user_2_id) VALUES ($roomID, $authorID, $otherID)";
-        dmCommand.Parameters.AddWithValue("$roomID", -1);
-    }
-
-    public async Task push_setRoomPrivacy(int roomID, string newPrivacy, string userID, string userSecret) {
-        string realSecret = await GetUserSecret(userID);
-        if (realSecret != userSecret) {
-            Console.WriteLine("Passed secret did not match real secret of " + realSecret);
-            await Clients.Caller.SendAsync("push_serverMessage", "Server could not authenticate your request, please clear your cookies and log in again");
-            return;
-        }
-
-        if (await UserAccessLevelInRoom(userID, roomID) < 2) {
-            await Clients.Caller.SendAsync("push_serverMessage", "You do not have permission to set room privacy!");
-            return;
-        }
-
-        newPrivacy = newPrivacy.ToLower();
-        if (newPrivacy != "public" && newPrivacy != "private") {
-            await Clients.Caller.SendAsync("push_serverMessage", "Cannot set room privacy to \"" + newPrivacy +"\", newPrivacy value must be either PUBLIC or PRIVATE!");
-            return;
-        }
-
-        SqliteCommand roomCommand = Program.database!.CreateCommand();
-        roomCommand.CommandText = "UPDATE rooms SET privacy = $newPrivacy WHERE id = $roomID";
-        roomCommand.Parameters.AddWithValue("$newPrivacy", newPrivacy.ToUpper());
-        roomCommand.Parameters.AddWithValue("$roomID", roomID);
-        roomCommand.ExecuteNonQuery();
-        roomCommand.Dispose();
-    }
-
-    public static async Task<string> GetUserSecret(string userID) {
-        SqliteCommand getCommand = Program.database!.CreateCommand();
-        getCommand.CommandText = "SELECT secret FROM users WHERE user_id = $userID LIMIT 1";
-        getCommand.Parameters.AddWithValue("$userID", userID);
-        object? result = await getCommand.ExecuteScalarAsync()!;
-        getCommand.Dispose();
-
-        if (result != null && result != DBNull.Value) {
-            getCommand.Dispose();
-            return result.ToString()!.TrimEnd("=").ToString();
-        }
-
-        return "-1";
-    }
-
-    public static async Task<int> UserAccessLevelInRoom(string userID, int roomID) {
-        if (roomID == 0) {
-            if (userID == "7f718957-5509-42a0-a18c-428989b3697a") {
-                return 2;
-            }
-            return 0;
-        }
-
-        SqliteCommand getCommand = Program.database!.CreateCommand();
-        getCommand.CommandText = "SELECT access_level FROM roomAccess WHERE user_id = $userID AND room_id = $roomID";
-        getCommand.Parameters.AddWithValue("$userID", userID);
-        getCommand.Parameters.AddWithValue("$roomID", roomID);
-        object? result = await getCommand.ExecuteScalarAsync()!;
-        getCommand.Dispose();
-
-        if (result != null && result != DBNull.Value) {
-            getCommand.Dispose();
-            return (int)(long)result;
-        }
-
-        return -1;
     }
 }
