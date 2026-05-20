@@ -440,7 +440,7 @@ public class Program {
 	public static IResult GetAo3ApiResponse(string file, string[] args) {
         ProcessStartInfo start = new ProcessStartInfo();
         start.FileName = "python";
-        string arguments = file + ".py ";
+        string arguments = "\"C:\\Users\\Kiwian\\Downloads\\Github Repos\\kiwiapi\\" + file + ".py\" ";
         foreach (string argument in args) {
             arguments += "\"" + argument + "\" ";
         }
