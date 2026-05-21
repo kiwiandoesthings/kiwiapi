@@ -5,7 +5,6 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using HtmlAgilityPack;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 
@@ -29,7 +28,7 @@ public class Program {
         });
         builder.Services.AddCors(options => {
             options.AddDefaultPolicy(policy => {
-                policy.WithOrigins("http://localhost:8000", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiandoesthings.place", "https://www.kiwiandoesthings.place", "https://www.api.kiwiandoesthings.place", "https://www.protocall.kiwiandoesthings.place");
+                policy.WithOrigins("http://localhost:8000", "https://localhost:8000", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiandoesthings.place", "https://www.kiwiandoesthings.place", "https://www.api.kiwiandoesthings.place", "https://www.protocall.kiwiandoesthings.place");
                 policy.AllowAnyMethod();
                 policy.AllowAnyHeader();
                 policy.AllowCredentials();
@@ -67,7 +66,7 @@ public class Program {
         client.DefaultRequestHeaders.Add("Dnt", "1");
         client.DefaultRequestHeaders.Add("Priority", "u=0, i");
         client.DefaultRequestHeaders.Add("Referer", "https://archiveofourown.org/");
-        client.DefaultRequestHeaders.Add("Sec-Ch-Ua", "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"\r\n");
+        client.DefaultRequestHeaders.Add("Sec-Ch-Ua", "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"");
 		client.DefaultRequestHeaders.Add("Sec-Ch-Ua-Mobile", "?0");
         client.DefaultRequestHeaders.Add("Sec-Ch-Ua-Platform", "\"Windows\"");
 		client.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "document");
@@ -189,7 +188,6 @@ public class Program {
             queryCommand.Dispose();
             reader.Dispose();
 
-            Console.WriteLine(info);
             SqliteCommand registerCommand = database!.CreateCommand();
             registerCommand.CommandText = "INSERT INTO users (user_id, username, color, password, secret, info) VALUES ($userID, $username, $userColor, $userPassword, $userSecret, $info);";
             Guid userID = Guid.NewGuid();
@@ -224,16 +222,10 @@ public class Program {
             if (await reader.ReadAsync()) {
                 string userID = reader.GetString(0);
                 string userSecret = reader.GetString(1);
-                CookieOptions secretCookieOptions = new CookieOptions {
-                    HttpOnly = true,
-                    Secure = true,
-                    SameSite = SameSiteMode.Strict,
-                    Expires = DateTimeOffset.UtcNow.AddDays(365)
-                };
-                context.Response.Cookies.Append("userSecret", userSecret, secretCookieOptions);
+
+                AppendUserLoginfo(context, userID, userSecret);
                 result = new {
-                    userID = userID,
-                    userSecret = userSecret
+                    userID = userID
                 };
             }
 
@@ -300,7 +292,11 @@ public class Program {
             return result != null ? Results.Ok(result) : Results.NotFound("No room with that ID was found");
         });
 
-        app.MapGet("/request_roomSearch", async (string targetName, string userID, string userSecret) => {
+        app.MapGet("/request_roomSearch", async (HttpContext context, string targetName) => {
+            if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
+                return Results.BadRequest();
+            }
+
 			bool error = await GoodSecret(userID, userSecret);
 			if (error) {
 				return LogBadUserSecret(userID, userSecret);
@@ -321,9 +317,13 @@ public class Program {
             return Results.Ok(results);
         });
 
-        app.MapPost("/push_deleteAccount", async (HttpRequest request, string userID, string userSecret) => {
+        app.MapPost("/push_deleteAccount", async (HttpContext context) => {
+            if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
+                return Results.BadRequest();
+            }
+
             Console.WriteLine("PTC | Attempting to delete account with userID \"" + userID + "\", and userSecret \"" + userSecret + "\"");
-			Console.WriteLine("PTC | From " + request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + request.Headers.UserAgent.ToString());
+			Console.WriteLine("PTC | From " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
 
 			bool error = await GoodSecret(userID, userSecret);
 			if (error) {
@@ -336,11 +336,17 @@ public class Program {
 			deleteCommand.ExecuteNonQuery();
 			deleteCommand.Dispose();
 
+            AppendUserLoginfo(context, "", "");
+
             return Results.Ok();
 		});
 
-        app.MapPost("/push_createRoomPersonal", async (HttpRequest request, string authorID, string authorSecret, string otherID) => {
-			bool error = await GoodSecret(authorID, authorSecret);
+        app.MapPost("/push_createRoomPersonal", async (HttpContext context, string otherID) => {
+            if (GetUserInfo(context, out string authorID, out string authorSecret) == -1) {
+                return Results.BadRequest();
+            }
+
+            bool error = await GoodSecret(authorID, authorSecret);
 			if (error) {
 				return LogBadUserSecret(authorID, authorSecret);
 			}
@@ -352,8 +358,12 @@ public class Program {
             });
 		});
 
-        app.MapPost("/push_setRoomPrivacy", async (int roomID, string newPrivacy, string userID, string userSecret) => {
-			bool error = await GoodSecret(userID, userSecret);
+        app.MapPost("/push_setRoomPrivacy", async (HttpContext context, int roomID, string newPrivacy) => {
+            if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
+                return Results.BadRequest();
+            }
+
+            bool error = await GoodSecret(userID, userSecret);
 			if (error) {
 				return LogBadUserSecret(userID, userSecret);
 			}
@@ -479,7 +489,7 @@ public class Program {
 
 	public static async Task<bool> GoodSecret(string userID, string userSecret) {
 		string realSecret = await GetUserSecret(userID);
-		if (realSecret != userSecret) {
+		if (realSecret != ProcessSecret(userSecret)) {
 			Console.WriteLine("API | Passed secret did not match real secret of " + realSecret);
 			return true;
 		}
@@ -488,15 +498,20 @@ public class Program {
 	}
 
 	public static async Task<bool> VerifyRequest(ISingleClientProxy client, string userID, string userSecret, string requestType) {
+        string trimmedSecret = ProcessSecret(userSecret);
 		string realSecret = await GetUserSecret(userID);
-		if (realSecret != userSecret) {
-			Console.WriteLine("WSS | Passed secret did not match real secret of " + realSecret);
+		if (realSecret != trimmedSecret) {
+			Console.WriteLine("WSS | Passed secret \"" + trimmedSecret + "\" did not match real secret of " + realSecret);
 			await client.SendAsync("push_serverMessage", "Server could not authenticate your " + requestType + ", please clear your cookies and log in again");
 			return true;
 		}
 
 		return false;
 	}
+
+    public static string ProcessSecret(string originalSecret) {
+        return WebUtility.UrlDecode(new string(originalSecret.TrimEnd("=")));
+    }
 
 	public static bool ValidString(string toCheck) {
 		return Regex.IsMatch(toCheck, @"^[a-zA-Z0-9\-_]+$") && toCheck.Length <= 18;
@@ -547,5 +562,39 @@ public class Program {
     public static IResult LogBadUserSecret(string userID, string userSecret) {
         Console.WriteLine("PTC | Request with bad secret using userID \"" + userID + "\", and userSecret \"" + userSecret + "\"");
         return Results.Unauthorized();
+    }
+
+    public static int GetUserInfo(HttpContext context, out string userID, out string userSecret) {
+        userID = context.Request.Cookies["userID"]!;
+        userSecret = context.Request.Cookies["userSecret"]!;
+
+        if (string.IsNullOrEmpty(userID) || string.IsNullOrEmpty(userSecret)) {
+            return -1;
+        }
+        return 0;
+    }
+
+    public static void AppendUserLoginfo(HttpContext context, string userID, string userSecret) {
+        string? origin = context.Request.Headers.Origin.FirstOrDefault();
+        string? referer = context.Request.Headers.Referer.FirstOrDefault();
+        bool isLocalhost = (origin != null && origin.Contains("localhost")) || (referer != null && referer.Contains("localhost"));
+        CookieOptions secretCookieOptions = new CookieOptions {
+            HttpOnly = true,
+            Domain = isLocalhost ? null : ".kiwiandoesthings.place",
+            SameSite = isLocalhost ? SameSiteMode.Lax : SameSiteMode.Strict,
+            Secure = !isLocalhost,
+            Expires = DateTimeOffset.UtcNow.AddDays(365),
+            Path = "/"
+        };
+        CookieOptions normalCookieOptions = new CookieOptions {
+            HttpOnly = false,
+            Domain = isLocalhost ? null : ".kiwiandoesthings.place",
+            SameSite = isLocalhost ? SameSiteMode.Lax : SameSiteMode.Strict,
+            Secure = !isLocalhost,
+            Expires = DateTimeOffset.UtcNow.AddDays(365),
+            Path = "/"
+        };
+        context.Response.Cookies.Append("userSecret", userSecret, secretCookieOptions);
+        context.Response.Cookies.Append("userID", userID, normalCookieOptions);
     }
 }

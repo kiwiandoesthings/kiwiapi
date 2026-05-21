@@ -13,9 +13,15 @@ def main():
         search.page = page
         search.update()
         for result in search.results:
+            allUsernames = [author.username for author in result.authors]
+
+            if len(allUsernames) > 0:
+                authorNames = ", ".join(allUsernames)
+            else:
+                authorNames = "Anonymous"
             storyList.append({
                 "id": result.id,
-                "info": result.title + ", by " + result.author
+                "info": result.title + ", by " + authorNames
             })
         print(json.dumps(storyList))
     except Exception as e:

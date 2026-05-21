@@ -5,12 +5,10 @@ using Microsoft.Data.Sqlite;
 
 public class ProtoCall : Hub {
     public record MessagesData(string authorID, string content, int messageIndex, string messageTimestamp);
-    private Dictionary<string, bool> userConnections = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> userConnections = new();
 
     public override async Task OnConnectedAsync() {
-        string? userID = Context.GetHttpContext()!.Request.Query["userID"];
-        string? userSecret = Context.GetHttpContext()!.Request.Cookies["userSecret"];
-        if (string.IsNullOrEmpty(userID) || string.IsNullOrEmpty(userSecret)) {
+        if (Program.GetUserInfo(Context.GetHttpContext()!, out string userID, out string userSecret) == -1) {
             Context.Abort();
             return;
         }
@@ -30,13 +28,11 @@ public class ProtoCall : Hub {
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception) {
-        string? userID = Context.GetHttpContext()!.Request.Query["userID"];
-        string? userSecret = Context.GetHttpContext()!.Request.Query["userSecret"];
-        if (userID == null || userSecret == null) {
+        if (Program.GetUserInfo(Context.GetHttpContext()!, out string userID, out string userSecret) == -1) {
             return;
         }
 
-		bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "connection");
+        bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "connection");
 		if (error) {
 			Program.LogBadUserSecret(userID, userSecret);
 			return;
@@ -49,8 +45,12 @@ public class ProtoCall : Hub {
         await base.OnDisconnectedAsync(exception);
     }
 
-    public async Task push_sendMessage(string userID, string userSecret, string message, string messageTimestamp, int roomID) {
-        Console.WriteLine("Got message from userID: " + userID + " with secret: " + userSecret + " with content: \"" + message + "\"");
+    public async Task push_sendMessage(string message, string messageTimestamp, int roomID) {
+        if (Program.GetUserInfo(Context.GetHttpContext()!, out string userID, out string userSecret) == -1) {
+            return;
+        }
+
+        //Console.WriteLine("Got message from userID: " + userID + " with secret: " + userSecret + " with content: \"" + message + "\"");
 
 		bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "message");
 		if (error) {
@@ -85,8 +85,12 @@ public class ProtoCall : Hub {
         sendCommand.Dispose();
     }
 
-    public async Task push_messageRequest(int messageIndex, int messageCount, string userID, string userSecret, int roomID) {
-		bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "request");
+    public async Task push_messageRequest(int messageIndex, int messageCount, int roomID) {
+        if (Program.GetUserInfo(Context.GetHttpContext()!, out string userID, out string userSecret) == -1) {
+            return;
+        }
+
+        bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "request");
 		if (error) {
 			Program.LogBadUserSecret(userID, userSecret);
 			return;
