@@ -15,7 +15,7 @@ public class Program {
     private record RoomResult(string roomName, int roomID);
 
     public static void Main(string[] args) {
-        string connectionString = "Data Source=" + "C:\\Users\\jonah\\Downloads\\Github Repos\\kiwiapi\\protocall.db";
+        string connectionString = "Data Source=" + "C:\\Users\\Kiwian\\Downloads\\Github Repos\\kiwiapi\\protocall.db";
         database = new SqliteConnection(connectionString);
         database.Open();
 
@@ -173,7 +173,7 @@ public class Program {
                 errorMessage += "Username and/or color are using restricted values (username cannot be \"System\" or \"Unknown User\" and color cannot be black).";
             }
             if (errorMessage != "") {
-                return Results.BadRequest(errorMessage);
+                return BadRequest(errorMessage);
             }
 
             SqliteCommand queryCommand = database!.CreateCommand();
@@ -183,7 +183,7 @@ public class Program {
             while (await reader.ReadAsync()) {
                 queryCommand.Dispose();
                 reader.Dispose();
-                return Results.BadRequest("There is already a user with that username.");
+                return BadRequest("There is already a user with that username.");
             }
             queryCommand.Dispose();
             reader.Dispose();
@@ -232,7 +232,7 @@ public class Program {
             reader.Dispose();
             queryCommand.Dispose();
 
-            return result != null ? Results.Ok(result) : Results.NotFound("No user with that login information was found");
+            return result != null ? Results.Ok(result) : NotFound("No user with that login information was found");
         });
 
         app.MapGet("/request_userInfo", async (string userID) => {
@@ -252,7 +252,7 @@ public class Program {
             reader.Dispose();
             queryCommand.Dispose();
 
-            return result != null ? Results.Ok(result) : Results.NotFound("No user with that ID was found");
+            return result != null ? Results.Ok(result) : NotFound("No user with that ID was found");
         });
 
         app.MapGet("/request_roomID", async (string roomName) => {
@@ -269,7 +269,7 @@ public class Program {
             reader.Dispose();
             queryCommand.Dispose();
 
-            return result != null ? Results.Ok(result) : Results.NotFound("No room with that name was found");
+            return result != null ? Results.Ok(result) : NotFound("No room with that name was found");
 		});
 
         app.MapGet("/request_roomInfo", async (int roomID) => {
@@ -289,7 +289,7 @@ public class Program {
             reader.Dispose();
             queryCommand.Dispose();
 
-            return result != null ? Results.Ok(result) : Results.NotFound("No room with that ID was found");
+            return result != null ? Results.Ok(result) : NotFound("No room with that ID was found");
         });
 
         app.MapGet("/request_roomSearch", async (HttpContext context, string targetName) => {
@@ -369,12 +369,12 @@ public class Program {
 			}
 
 			if (await UserAccessLevelInRoom(userID, roomID) < 2) {
-				return Results.Unauthorized();
+				return Unauthorized("You do not have moderator permissions in this room!");
 			}
 
 			newPrivacy = newPrivacy.ToLower();
 			if (newPrivacy != "public" && newPrivacy != "private") {
-                return Results.BadRequest("Privacy must be either PUBLIC or PRIVATE, instead found \"" + newPrivacy + "\"");
+                return BadRequest("Privacy must be either PUBLIC or PRIVATE, instead found \"" + newPrivacy + "\"");
 			}
 
 			SqliteCommand roomCommand = Program.database!.CreateCommand();
@@ -420,7 +420,7 @@ public class Program {
                 });
             }
 
-            return Results.NotFound("No user with that ID was found");
+            return NotFound("No user with that ID was found");
         });
 
         app.MapPost("/push_setUserAccess", async (HttpContext context, string otherID, int accessLevel, int roomID) => {
@@ -429,7 +429,7 @@ public class Program {
 			}
 
             if (!await GetUserIDExists(otherID)) {
-                return Results.BadRequest("No user with that ID was found");
+                return BadRequest("No user with that ID was found");
             }
 
 			bool error = await GoodSecret(userID, userSecret);
@@ -438,14 +438,14 @@ public class Program {
 			}
 
 			if (await UserAccessLevelInRoom(userID, roomID) < 2) {
-                return Results.Unauthorized();
-			}
+                return Unauthorized("You do not have moderator permissions in this room!");
+            }
 
             SqliteCommand setCommand = database!.CreateCommand();
-            setCommand.CommandText = "UPDATE roomAccess SET access_level = $accessLevel WHERE user_id = $userID AND room_id = $roomID";
-            setCommand.Parameters.AddWithValue("$accessLevel", accessLevel);
-            setCommand.Parameters.AddWithValue("$userID", otherID);
+            setCommand.CommandText = "INSERT INTO roomAccess (room_id, user_id, access_level) VALUES ($roomID, $userID, $accessLevel) ON CONFLICT(room_id, user_id) DO UPDATE SET access_level = $accessLevel";
             setCommand.Parameters.AddWithValue("$roomID", roomID);
+            setCommand.Parameters.AddWithValue("$userID", otherID);
+            setCommand.Parameters.AddWithValue("$accessLevel", accessLevel);
             await setCommand.ExecuteNonQueryAsync();
             setCommand.Dispose();
 
@@ -614,7 +614,7 @@ public class Program {
 
     public static IResult LogBadUserSecret(string userID, string userSecret) {
         Console.WriteLine("PTC | Request with bad secret using userID \"" + userID + "\", and userSecret \"" + userSecret + "\"");
-        return Results.Unauthorized();
+        return Unauthorized("Your passed user secret does not match the authoritative one. Please clear your cookies and log in again.");
     }
 
     public static int GetUserInfo(HttpContext context, out string userID, out string userSecret) {
@@ -653,6 +653,33 @@ public class Program {
 
     public static IResult CouldNotGetAuth() {
         Console.WriteLine("PTC | User tried to make request, but server could not extract userID and secret from cookies");
-        return Results.BadRequest("Could not get user authentication information from request. Please log in again.");
+        return BadRequest("Could not get user authentication information from request. Please log in again.");
 	}
+
+    public static IResult Unauthorized(string error) {
+        return Results.Content(
+            error,
+            "text/plain",
+            System.Text.Encoding.UTF8,
+            statusCode: 401
+        );
+    }
+
+    public static IResult NotFound(string error) {
+        return Results.Content(
+            error,
+            "text/plain",
+            System.Text.Encoding.UTF8,
+            statusCode: 404
+        );
+    }
+
+    public static IResult BadRequest(string error) {
+        return Results.Content(
+            error,
+            "text/plain",
+            System.Text.Encoding.UTF8,
+            statusCode: 400
+        );
+    }
 }
