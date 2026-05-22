@@ -22,6 +22,8 @@ public class ProtoCall : Hub {
 
         userConnections[userID] = true;
 
+        Console.WriteLine("PTC | Client with user ID " + userID + " connected");
+
         await Clients.All.SendAsync("push_userStatus", userID, true);
 
         await base.OnConnectedAsync();
@@ -40,7 +42,9 @@ public class ProtoCall : Hub {
 
 		userConnections[userID] = false;
 
-        await Clients.All.SendAsync("push_userStatus", userID, false);
+		Console.WriteLine("PTC | Client with user ID " + userID + " disconnected");
+
+		await Clients.All.SendAsync("push_userStatus", userID, false);
 
         await base.OnDisconnectedAsync(exception);
     }
@@ -49,8 +53,6 @@ public class ProtoCall : Hub {
         if (Program.GetUserInfo(Context.GetHttpContext()!, out string userID, out string userSecret) == -1) {
             return;
         }
-
-        //Console.WriteLine("Got message from userID: " + userID + " with secret: " + userSecret + " with content: \"" + message + "\"");
 
 		bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "message");
 		if (error) {
@@ -62,6 +64,8 @@ public class ProtoCall : Hub {
             await Clients.Caller.SendAsync("push_serverMessage", "You do not have access to this room!");
             return;
         }
+
+        Console.WriteLine("PTC | Got message from user with ID " + userID + " in room with ID " + roomID + " and content of \"" + message + "\"");
 
         SqliteCommand idCommand = Program.database!.CreateCommand();
         idCommand.CommandText = "SELECT IFNULL(MAX(local_id), 0) + 1 FROM messages WHERE room_id = $roomID";

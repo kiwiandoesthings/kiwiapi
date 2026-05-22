@@ -15,7 +15,7 @@ public class Program {
     private record RoomResult(string roomName, int roomID);
 
     public static void Main(string[] args) {
-        string connectionString = "Data Source=" + "C:\\Users\\Kiwian\\Downloads\\Github Repos\\kiwiapi\\protocall.db";
+        string connectionString = "Data Source=" + "C:\\Users\\jonah\\Downloads\\Github Repos\\kiwiapi\\protocall.db";
         database = new SqliteConnection(connectionString);
         database.Open();
 
@@ -294,8 +294,8 @@ public class Program {
 
         app.MapGet("/request_roomSearch", async (HttpContext context, string targetName) => {
             if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
-                return Results.BadRequest();
-            }
+                return CouldNotGetAuth();
+			}
 
 			bool error = await GoodSecret(userID, userSecret);
 			if (error) {
@@ -319,8 +319,8 @@ public class Program {
 
         app.MapPost("/push_deleteAccount", async (HttpContext context) => {
             if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
-                return Results.BadRequest();
-            }
+				return CouldNotGetAuth();
+			}
 
             Console.WriteLine("PTC | Attempting to delete account with userID \"" + userID + "\", and userSecret \"" + userSecret + "\"");
 			Console.WriteLine("PTC | From " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
@@ -343,8 +343,8 @@ public class Program {
 
         app.MapPost("/push_createRoomPersonal", async (HttpContext context, string otherID) => {
             if (GetUserInfo(context, out string authorID, out string authorSecret) == -1) {
-                return Results.BadRequest();
-            }
+				return CouldNotGetAuth();
+			}
 
             bool error = await GoodSecret(authorID, authorSecret);
 			if (error) {
@@ -360,8 +360,8 @@ public class Program {
 
         app.MapPost("/push_setRoomPrivacy", async (HttpContext context, int roomID, string newPrivacy) => {
             if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
-                return Results.BadRequest();
-            }
+				return CouldNotGetAuth();
+			}
 
             bool error = await GoodSecret(userID, userSecret);
 			if (error) {
@@ -369,12 +369,12 @@ public class Program {
 			}
 
 			if (await UserAccessLevelInRoom(userID, roomID) < 2) {
-				return LogBadUserSecret(userID, userSecret);
+				return Results.Unauthorized();
 			}
 
 			newPrivacy = newPrivacy.ToLower();
 			if (newPrivacy != "public" && newPrivacy != "private") {
-				return LogBadUserSecret(userID, userSecret);
+                return Results.BadRequest("Privacy must be either PUBLIC or PRIVATE, instead found \"" + newPrivacy + "\"");
 			}
 
 			SqliteCommand roomCommand = Program.database!.CreateCommand();
@@ -408,6 +408,49 @@ public class Program {
 
             return Results.Ok(results);
         });
+
+        app.MapGet("/request_userID", async (string userName) => {
+            SqliteCommand queryCommand = database!.CreateCommand();
+            queryCommand.CommandText = "SELECT user_id FROM users WHERE username = $userName";
+            queryCommand.Parameters.AddWithValue("$userName", userName);
+            SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            if (await reader.ReadAsync()) {
+                return Results.Ok(new {
+                    userID = reader.GetString(0)
+                });
+            }
+
+            return Results.NotFound("No user with that ID was found");
+        });
+
+        app.MapPost("/push_setUserAccess", async (HttpContext context, string otherID, int accessLevel, int roomID) => {
+			if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
+                return CouldNotGetAuth();
+			}
+
+            if (!await GetUserIDExists(otherID)) {
+                return Results.BadRequest("No user with that ID was found");
+            }
+
+			bool error = await GoodSecret(userID, userSecret);
+			if (error) {
+				return LogBadUserSecret(userID, userSecret);
+			}
+
+			if (await UserAccessLevelInRoom(userID, roomID) < 2) {
+                return Results.Unauthorized();
+			}
+
+            SqliteCommand setCommand = database!.CreateCommand();
+            setCommand.CommandText = "UPDATE roomAccess SET access_level = $accessLevel WHERE user_id = $userID AND room_id = $roomID";
+            setCommand.Parameters.AddWithValue("$accessLevel", accessLevel);
+            setCommand.Parameters.AddWithValue("$userID", otherID);
+            setCommand.Parameters.AddWithValue("$roomID", roomID);
+            await setCommand.ExecuteNonQueryAsync();
+            setCommand.Dispose();
+
+            return Results.Ok();
+		});
 
         app.MapGet("/request_deviceInfo", (HttpContext context) => {
             string? ip = context.Request.Headers["CF-Connecting-IP"].FirstOrDefault();
@@ -536,6 +579,16 @@ public class Program {
 		return "";
 	}
 
+    public static async Task<bool> GetUserIDExists(string userID) {
+        SqliteCommand queryCommand = database!.CreateCommand();
+		queryCommand.CommandText = "SELECT 1 FROM users WHERE user_id = $userID";
+		queryCommand.Parameters.AddWithValue("$userID", userID);
+		object? result = await queryCommand.ExecuteScalarAsync();
+		queryCommand.Dispose();
+
+        return result != null;
+    }
+
 	public static async Task<int> UserAccessLevelInRoom(string userID, int roomID) {
 		if (roomID == 0) {
 			if (userID == "7f718957-5509-42a0-a18c-428989b3697a") {
@@ -597,4 +650,9 @@ public class Program {
         context.Response.Cookies.Append("userSecret", userSecret, secretCookieOptions);
         context.Response.Cookies.Append("userID", userID, normalCookieOptions);
     }
+
+    public static IResult CouldNotGetAuth() {
+        Console.WriteLine("PTC | User tried to make request, but server could not extract userID and secret from cookies");
+        return Results.BadRequest("Could not get user authentication information from request. Please log in again.");
+	}
 }
