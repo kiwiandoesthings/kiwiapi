@@ -28,7 +28,7 @@ public class Program {
         });
         builder.Services.AddCors(options => {
             options.AddDefaultPolicy(policy => {
-                policy.WithOrigins("http://localhost:8000", "https://localhost:8000", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiandoesthings.place", "https://www.kiwiandoesthings.place", "https://www.api.kiwiandoesthings.place", "https://www.protocall.kiwiandoesthings.place");
+                policy.WithOrigins("https://test.kiwiandoesthings.place:8000", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiandoesthings.place", "https://www.kiwiandoesthings.place", "https://www.api.kiwiandoesthings.place", "https://www.protocall.kiwiandoesthings.place");
                 policy.AllowAnyMethod();
                 policy.AllowAnyHeader();
                 policy.AllowCredentials();
@@ -159,7 +159,7 @@ public class Program {
 			Console.WriteLine("PTC | From " + request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + request.Headers.UserAgent.ToString());
 
 			bool filledOut = username != "" && password != "" && color != "";
-            bool validInformation = ValidString(username) && ValidString(password)  &ValidHex(color);
+            bool validInformation = ValidString(username) && ValidString(password) && ValidHex(color);
             bool validUsernameAndColor = username.ToLower() != "system" && username.ToLower() != "unknown user" && color != "000000";
 
             string errorMessage = "";
@@ -577,18 +577,18 @@ public class Program {
     public static void AppendUserLoginfo(HttpContext context, string userID, string userSecret) {
         string? origin = context.Request.Headers.Origin.FirstOrDefault();
         string? referer = context.Request.Headers.Referer.FirstOrDefault();
-        bool isLocalhost = (origin != null && origin.Contains("localhost")) || (referer != null && referer.Contains("localhost"));
+        bool isLocalhost = (origin != null && origin.Contains("test")) || (referer != null && referer.Contains("test"));
         CookieOptions secretCookieOptions = new CookieOptions {
             HttpOnly = true,
-            Domain = isLocalhost ? null : ".kiwiandoesthings.place",
-            SameSite = isLocalhost ? SameSiteMode.Lax : SameSiteMode.Strict,
-            Secure = !isLocalhost,
+            Domain = "kiwiandoesthings.place",
+            SameSite = isLocalhost ? SameSiteMode.None : SameSiteMode.Strict,
+            Secure = true,
             Expires = DateTimeOffset.UtcNow.AddDays(365),
             Path = "/"
         };
         CookieOptions normalCookieOptions = new CookieOptions {
             HttpOnly = false,
-            Domain = isLocalhost ? null : ".kiwiandoesthings.place",
+            Domain = "kiwiandoesthings.place",
             SameSite = isLocalhost ? SameSiteMode.Lax : SameSiteMode.Strict,
             Secure = !isLocalhost,
             Expires = DateTimeOffset.UtcNow.AddDays(365),
