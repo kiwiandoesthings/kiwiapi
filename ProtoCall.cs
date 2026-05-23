@@ -22,7 +22,7 @@ public class ProtoCall : Hub {
 
         userConnections[userID] = true;
 
-        Console.WriteLine("PTC | Client with user ID " + userID + " connected");
+        //Console.WriteLine("PTC | Client with user ID " + userID + " connected");
 
         await Clients.All.SendAsync("push_userStatus", userID, true);
 
@@ -42,7 +42,7 @@ public class ProtoCall : Hub {
 
 		userConnections[userID] = false;
 
-		Console.WriteLine("PTC | Client with user ID " + userID + " disconnected");
+		//Console.WriteLine("PTC | Client with user ID " + userID + " disconnected");
 
 		await Clients.All.SendAsync("push_userStatus", userID, false);
 

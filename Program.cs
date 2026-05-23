@@ -358,6 +358,26 @@ public class Program {
             });
 		});
 
+        app.MapPost("/push_createRoom", async (HttpContext context, string roomName) => {
+            if (GetUserInfo(context, out string authorID, out string authorSecret) == -1) {
+                return CouldNotGetAuth();
+            }
+
+            bool error = await GoodSecret(authorID, authorSecret);
+            if (error) {
+                return LogBadUserSecret(authorID, authorSecret);
+            }
+
+            if (await GetRoomID(roomName) != -1) {
+                return BadRequest("A room with that name already exists!");
+            }
+            int roomID = CreateRoom(roomName, authorID);
+
+            return Results.Ok(new {
+                roomID = roomID
+            });
+        });
+
         app.MapPost("/push_setRoomPrivacy", async (HttpContext context, int roomID, string newPrivacy) => {
             if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
 				return CouldNotGetAuth();
@@ -512,6 +532,8 @@ public class Program {
     }
 
     public static int CreateRoom(string roomName, string ownerID) {
+        
+
 		SqliteCommand roomCommand = database!.CreateCommand();
 		roomCommand.CommandText = "INSERT INTO rooms (name, author_id) VALUES ($roomName, $authorID); SELECT last_insert_rowid();";
 		roomCommand.Parameters.AddWithValue("$roomName", roomName);
@@ -587,6 +609,20 @@ public class Program {
 		queryCommand.Dispose();
 
         return result != null;
+    }
+
+    public static async Task<int> GetRoomID(string roomName) {
+        SqliteCommand queryCommand = database!.CreateCommand();
+        queryCommand.CommandText = "SELECT id FROM rooms WHERE name = $roomName";
+        queryCommand.Parameters.AddWithValue("$roomName", roomName);
+        SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+        object? result = null;
+        if (await reader.ReadAsync()) {
+            result = reader.GetInt32(0);
+        }
+        queryCommand.Dispose();
+
+        return result != null ? (int)result : -1;
     }
 
 	public static async Task<int> UserAccessLevelInRoom(string userID, int roomID) {
