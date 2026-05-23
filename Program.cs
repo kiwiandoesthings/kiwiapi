@@ -532,8 +532,6 @@ public class Program {
     }
 
     public static int CreateRoom(string roomName, string ownerID) {
-        
-
 		SqliteCommand roomCommand = database!.CreateCommand();
 		roomCommand.CommandText = "INSERT INTO rooms (name, author_id) VALUES ($roomName, $authorID); SELECT last_insert_rowid();";
 		roomCommand.Parameters.AddWithValue("$roomName", roomName);
@@ -627,7 +625,7 @@ public class Program {
 
 	public static async Task<int> UserAccessLevelInRoom(string userID, int roomID) {
 		if (roomID == 0) {
-			if (userID == "7f718957-5509-42a0-a18c-428989b3697a") {
+			if (userID == "82bc31a6-5f02-4d22-933c-566c60478aef") {
 				return 2;
 			}
 			return 0;
