@@ -15,7 +15,7 @@ public class Program {
     private record RoomResult(string roomName, int roomID);
 
     public static void Main(string[] args) {
-        string connectionString = "Data Source=" + "C:\\Users\\jonah\\Downloads\\Github Repos\\kiwiapi\\protocall.db";
+        string connectionString = "Data Source=" + "C:\\Users\\Kiwian\\Downloads\\Github Repos\\kiwiapi\\protocall.db";
         database = new SqliteConnection(connectionString);
         database.Open();
 
@@ -28,7 +28,7 @@ public class Program {
         });
         builder.Services.AddCors(options => {
             options.AddDefaultPolicy(policy => {
-                policy.WithOrigins("http://localhost:8000", "https://localhost:8000", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiandoesthings.place", "https://www.kiwiandoesthings.place", "https://www.api.kiwiandoesthings.place", "https://www.protocall.kiwiandoesthings.place");
+                policy.WithOrigins("https://test.kiwiandoesthings.place:8000", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiandoesthings.place", "https://www.kiwiandoesthings.place", "https://www.api.kiwiandoesthings.place", "https://www.protocall.kiwiandoesthings.place");
                 policy.AllowAnyMethod();
                 policy.AllowAnyHeader();
                 policy.AllowCredentials();
@@ -159,7 +159,7 @@ public class Program {
 			Console.WriteLine("PTC | From " + request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + request.Headers.UserAgent.ToString());
 
 			bool filledOut = username != "" && password != "" && color != "";
-            bool validInformation = ValidString(username) && ValidString(password)  &ValidHex(color);
+            bool validInformation = ValidString(username) && ValidString(password) && ValidHex(color);
             bool validUsernameAndColor = username.ToLower() != "system" && username.ToLower() != "unknown user" && color != "000000";
 
             string errorMessage = "";
@@ -173,7 +173,7 @@ public class Program {
                 errorMessage += "Username and/or color are using restricted values (username cannot be \"System\" or \"Unknown User\" and color cannot be black).";
             }
             if (errorMessage != "") {
-                return Results.BadRequest(errorMessage);
+                return BadRequest(errorMessage);
             }
 
             SqliteCommand queryCommand = database!.CreateCommand();
@@ -183,7 +183,7 @@ public class Program {
             while (await reader.ReadAsync()) {
                 queryCommand.Dispose();
                 reader.Dispose();
-                return Results.BadRequest("There is already a user with that username.");
+                return BadRequest("There is already a user with that username.");
             }
             queryCommand.Dispose();
             reader.Dispose();
@@ -232,7 +232,7 @@ public class Program {
             reader.Dispose();
             queryCommand.Dispose();
 
-            return result != null ? Results.Ok(result) : Results.NotFound("No user with that login information was found");
+            return result != null ? Results.Ok(result) : NotFound("No user with that login information was found");
         });
 
         app.MapGet("/request_userInfo", async (string userID) => {
@@ -252,7 +252,7 @@ public class Program {
             reader.Dispose();
             queryCommand.Dispose();
 
-            return result != null ? Results.Ok(result) : Results.NotFound("No user with that ID was found");
+            return result != null ? Results.Ok(result) : NotFound("No user with that ID was found");
         });
 
         app.MapGet("/request_roomID", async (string roomName) => {
@@ -269,7 +269,7 @@ public class Program {
             reader.Dispose();
             queryCommand.Dispose();
 
-            return result != null ? Results.Ok(result) : Results.NotFound("No room with that name was found");
+            return result != null ? Results.Ok(result) : NotFound("No room with that name was found");
 		});
 
         app.MapGet("/request_roomInfo", async (int roomID) => {
@@ -289,7 +289,7 @@ public class Program {
             reader.Dispose();
             queryCommand.Dispose();
 
-            return result != null ? Results.Ok(result) : Results.NotFound("No room with that ID was found");
+            return result != null ? Results.Ok(result) : NotFound("No room with that ID was found");
         });
 
         app.MapGet("/request_roomSearch", async (HttpContext context, string targetName) => {
@@ -358,6 +358,26 @@ public class Program {
             });
 		});
 
+        app.MapPost("/push_createRoom", async (HttpContext context, string roomName) => {
+            if (GetUserInfo(context, out string authorID, out string authorSecret) == -1) {
+                return CouldNotGetAuth();
+            }
+
+            bool error = await GoodSecret(authorID, authorSecret);
+            if (error) {
+                return LogBadUserSecret(authorID, authorSecret);
+            }
+
+            if (await GetRoomID(roomName) != -1) {
+                return BadRequest("A room with that name already exists!");
+            }
+            int roomID = CreateRoom(roomName, authorID);
+
+            return Results.Ok(new {
+                roomID = roomID
+            });
+        });
+
         app.MapPost("/push_setRoomPrivacy", async (HttpContext context, int roomID, string newPrivacy) => {
             if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
 				return CouldNotGetAuth();
@@ -369,12 +389,12 @@ public class Program {
 			}
 
 			if (await UserAccessLevelInRoom(userID, roomID) < 2) {
-				return Results.Unauthorized();
+				return Unauthorized("You do not have moderator permissions in this room!");
 			}
 
 			newPrivacy = newPrivacy.ToLower();
 			if (newPrivacy != "public" && newPrivacy != "private") {
-                return Results.BadRequest("Privacy must be either PUBLIC or PRIVATE, instead found \"" + newPrivacy + "\"");
+                return BadRequest("Privacy must be either PUBLIC or PRIVATE, instead found \"" + newPrivacy + "\"");
 			}
 
 			SqliteCommand roomCommand = Program.database!.CreateCommand();
@@ -420,7 +440,7 @@ public class Program {
                 });
             }
 
-            return Results.NotFound("No user with that ID was found");
+            return NotFound("No user with that ID was found");
         });
 
         app.MapPost("/push_setUserAccess", async (HttpContext context, string otherID, int accessLevel, int roomID) => {
@@ -429,7 +449,7 @@ public class Program {
 			}
 
             if (!await GetUserIDExists(otherID)) {
-                return Results.BadRequest("No user with that ID was found");
+                return BadRequest("No user with that ID was found");
             }
 
 			bool error = await GoodSecret(userID, userSecret);
@@ -438,14 +458,14 @@ public class Program {
 			}
 
 			if (await UserAccessLevelInRoom(userID, roomID) < 2) {
-                return Results.Unauthorized();
-			}
+                return Unauthorized("You do not have moderator permissions in this room!");
+            }
 
             SqliteCommand setCommand = database!.CreateCommand();
-            setCommand.CommandText = "UPDATE roomAccess SET access_level = $accessLevel WHERE user_id = $userID AND room_id = $roomID";
-            setCommand.Parameters.AddWithValue("$accessLevel", accessLevel);
-            setCommand.Parameters.AddWithValue("$userID", otherID);
+            setCommand.CommandText = "INSERT INTO roomAccess (room_id, user_id, access_level) VALUES ($roomID, $userID, $accessLevel) ON CONFLICT(room_id, user_id) DO UPDATE SET access_level = $accessLevel";
             setCommand.Parameters.AddWithValue("$roomID", roomID);
+            setCommand.Parameters.AddWithValue("$userID", otherID);
+            setCommand.Parameters.AddWithValue("$accessLevel", accessLevel);
             await setCommand.ExecuteNonQueryAsync();
             setCommand.Dispose();
 
@@ -589,9 +609,23 @@ public class Program {
         return result != null;
     }
 
+    public static async Task<int> GetRoomID(string roomName) {
+        SqliteCommand queryCommand = database!.CreateCommand();
+        queryCommand.CommandText = "SELECT id FROM rooms WHERE name = $roomName";
+        queryCommand.Parameters.AddWithValue("$roomName", roomName);
+        SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+        object? result = null;
+        if (await reader.ReadAsync()) {
+            result = reader.GetInt32(0);
+        }
+        queryCommand.Dispose();
+
+        return result != null ? (int)result : -1;
+    }
+
 	public static async Task<int> UserAccessLevelInRoom(string userID, int roomID) {
 		if (roomID == 0) {
-			if (userID == "7f718957-5509-42a0-a18c-428989b3697a") {
+			if (userID == "82bc31a6-5f02-4d22-933c-566c60478aef") {
 				return 2;
 			}
 			return 0;
@@ -614,7 +648,7 @@ public class Program {
 
     public static IResult LogBadUserSecret(string userID, string userSecret) {
         Console.WriteLine("PTC | Request with bad secret using userID \"" + userID + "\", and userSecret \"" + userSecret + "\"");
-        return Results.Unauthorized();
+        return Unauthorized("Your passed user secret does not match the authoritative one. Please clear your cookies and log in again.");
     }
 
     public static int GetUserInfo(HttpContext context, out string userID, out string userSecret) {
@@ -630,18 +664,18 @@ public class Program {
     public static void AppendUserLoginfo(HttpContext context, string userID, string userSecret) {
         string? origin = context.Request.Headers.Origin.FirstOrDefault();
         string? referer = context.Request.Headers.Referer.FirstOrDefault();
-        bool isLocalhost = (origin != null && origin.Contains("localhost")) || (referer != null && referer.Contains("localhost"));
+        bool isLocalhost = (origin != null && origin.Contains("test")) || (referer != null && referer.Contains("test"));
         CookieOptions secretCookieOptions = new CookieOptions {
             HttpOnly = true,
-            Domain = isLocalhost ? null : ".kiwiandoesthings.place",
-            SameSite = isLocalhost ? SameSiteMode.Lax : SameSiteMode.Strict,
-            Secure = !isLocalhost,
+            Domain = "kiwiandoesthings.place",
+            SameSite = isLocalhost ? SameSiteMode.None : SameSiteMode.Strict,
+            Secure = true,
             Expires = DateTimeOffset.UtcNow.AddDays(365),
             Path = "/"
         };
         CookieOptions normalCookieOptions = new CookieOptions {
             HttpOnly = false,
-            Domain = isLocalhost ? null : ".kiwiandoesthings.place",
+            Domain = "kiwiandoesthings.place",
             SameSite = isLocalhost ? SameSiteMode.Lax : SameSiteMode.Strict,
             Secure = !isLocalhost,
             Expires = DateTimeOffset.UtcNow.AddDays(365),
@@ -653,6 +687,33 @@ public class Program {
 
     public static IResult CouldNotGetAuth() {
         Console.WriteLine("PTC | User tried to make request, but server could not extract userID and secret from cookies");
-        return Results.BadRequest("Could not get user authentication information from request. Please log in again.");
+        return BadRequest("Could not get user authentication information from request. Please log in again.");
 	}
+
+    public static IResult Unauthorized(string error) {
+        return Results.Content(
+            error,
+            "text/plain",
+            System.Text.Encoding.UTF8,
+            statusCode: 401
+        );
+    }
+
+    public static IResult NotFound(string error) {
+        return Results.Content(
+            error,
+            "text/plain",
+            System.Text.Encoding.UTF8,
+            statusCode: 404
+        );
+    }
+
+    public static IResult BadRequest(string error) {
+        return Results.Content(
+            error,
+            "text/plain",
+            System.Text.Encoding.UTF8,
+            statusCode: 400
+        );
+    }
 }
