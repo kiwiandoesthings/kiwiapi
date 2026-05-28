@@ -10,12 +10,18 @@ using Microsoft.Data.Sqlite;
 using SixLabors.ImageSharp;
 
 public class Program {
+    public static SqliteConnection? database;
     private static SocketsHttpHandler? handler;
     private static HttpClient? client;
-    public static SqliteConnection? database;
     private record RoomResult(string roomName, int roomID);
+    private static string? catboxHash = Environment.GetEnvironmentVariable("CATBOX_USER_HASH");
 
-    public static void Main(string[] args) {
+	public static void Main(string[] args) {
+		if (catboxHash == null) {
+            Console.WriteLine("Could not find environment variable \"CATBOX_USER_HASH\"");
+            return;
+        }
+
         string connectionString = "Data Source=" + "C:\\Users\\Kiwian\\Downloads\\Github Repos\\kiwiapi\\protocall.db";
         database = new SqliteConnection(connectionString);
         database.Open();
@@ -209,9 +215,9 @@ public class Program {
                 content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(profilePicture.ContentType);
 
                 using MultipartFormDataContent uploadRequest = new MultipartFormDataContent();
-                uploadRequest.Add(new StringContent("fileupload"), "reqtype");
+				uploadRequest.Add(new StringContent("fileupload"), "reqtype");
                 uploadRequest.Add(content, "fileToUpload", "profile_picture_" + userID.ToString());
-                uploadRequest.Add(new StringContent("af2ef9406b3574a8a6d2fd411"), "userhash");
+                uploadRequest.Add(new StringContent(catboxHash), "userhash");
                 using HttpResponseMessage response = await client!.PostAsync("https://catbox.moe/user/api.php", uploadRequest);
 
                 if (!response.IsSuccessStatusCode) {
