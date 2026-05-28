@@ -385,9 +385,9 @@ public class Program {
                 return auth.error;
             }
 
-			bool error = await GoodSecret(userID, userSecret);
+			bool error = await GoodSecret(auth.userID, auth.userSecret);
 			if (error) {
-				return LogBadUserSecret(userID, userSecret);
+				return LogBadUserSecret(auth.userID, auth.userSecret);
 			}
 
 			using SqliteCommand queryCommand = database!.CreateCommand();
@@ -412,9 +412,9 @@ public class Program {
             Console.WriteLine("PTC | Attempting to delete account with userID \"" + auth.userID + "\", and userSecret \"" + auth.userSecret + "\"");
 			Console.WriteLine("PTC | From " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
 
-			bool error = await GoodSecret(userID, userSecret);
+			bool error = await GoodSecret(auth.userID, auth.userSecret);
 			if (error) {
-                return LogBadUserSecret(userID, userSecret);
+                return LogBadUserSecret(auth.userID, auth.userSecret);
 			}
 
 			using SqliteCommand deleteCommand = database!.CreateCommand();
