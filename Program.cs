@@ -28,7 +28,10 @@ public class Program {
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
         builder.WebHost.UseUrls("http://localhost:5201", "https://localhost:7164");
-        builder.Services.AddControllers();
+		builder.WebHost.ConfigureKestrel(options => {
+			options.AddServerHeader = false;
+		});
+		builder.Services.AddControllers();
         builder.Services.AddOpenApi();
         builder.Services.AddSignalR(options => {
             options.EnableDetailedErrors = true;
@@ -43,7 +46,9 @@ public class Program {
         });
 
         WebApplication app = builder.Build();
-        app.UseRouting();
+		//app.UseExceptionHandler("/error");
+		app.UseHsts();
+		app.UseRouting();
         app.UseCors();
         app.MapOpenApi();
 
