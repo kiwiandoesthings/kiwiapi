@@ -49,11 +49,13 @@ public class ProtoCall : Hub {
 
     public async Task push_sendMessage(string message, string messageTimestamp, int roomID) {
         if (Program.GetUserInfo(Context.GetHttpContext()!, out string userID, out string userSecret) == -1) {
+            await Clients.Caller.SendAsync("push_serverMessage", "Your cookies are messed up. Please clear them and log in again.");
             return;
         }
 
 		if (await Program.VerifyRequest(Clients.Caller, userID, userSecret, "message")) {
             Program.LogBadUserSecret(userID, userSecret);
+            await Clients.Caller.SendAsync("push_serverMessage", "The server could not authenticate your message. Please clear your cookies and log in again.");
             return;
 		}
 
@@ -62,7 +64,7 @@ public class ProtoCall : Hub {
             return;
         }
 
-        Console.WriteLine("PTC | Got message from user with ID " + userID + " in room with ID " + roomID + " and content of \"" + message + "\"");
+        Console.WriteLine("PTC | Got message from user with ID " + userID + " in room with ID " + roomID + " and content of \"" + message + "\"" + userSecret);
 
         using SqliteCommand idCommand = Program.database!.CreateCommand();
         idCommand.CommandText = "SELECT IFNULL(MAX(local_id), 0) + 1 FROM messages WHERE room_id = $roomID";
