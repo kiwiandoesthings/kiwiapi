@@ -18,7 +18,7 @@ public class Program {
 
 	public static void Main(string[] args) {
 		if (catboxHash == null) {
-            Console.WriteLine("Could not find environment variable \"CATBOX_USER_HASH\"");
+            Console.WriteLine("INI | Could not find environment variable \"CATBOX_USER_HASH\"");
             return;
         }
 
@@ -86,13 +86,16 @@ public class Program {
 
         client.DefaultRequestVersion = HttpVersion.Version11;
 
-        app.MapGet("/hello", () => "Hello World!");
+        app.MapGet("/hello", () => {
+            return Results.Text("Heallo!", "text/plain");
+        });
 
         app.MapGet("/randint", (int min, int max) => {
             if (min > max) {
-                return "Invalid parameters.";
+                return Results.BadRequest("Parameter \"min\" must be smaller than or equal to \"max\".");
             }
-            return Random.Shared.Next(min, max + 1).ToString();
+
+            return Results.Text(Random.Shared.Next(min, max + 1).ToString(), "text/plain");
         });
 
         app.MapGet("/randsong", (HttpContext context, string folder = "rand") => {
@@ -105,7 +108,7 @@ public class Program {
             string folderPath = folderPaths[Random.Shared.Next(folderPaths.Length)];
             if (folder != "rand") {
                 switch (folder) {
-                    case "miku":
+                    case "vocaloid":
                         folderPath = folderPaths[2];
                         break;
                     case "lyrical":
@@ -115,7 +118,7 @@ public class Program {
                         folderPath = folderPaths[1];
                         break;
                     default:
-                        throw new ArgumentException("Parameter \"folder\" must be either \"miku\", \"lyrical\", \"instrumental\", or not passed to choose a random folder.");
+                        throw new ArgumentException("Parameter \"folder\" must be either \"vocaloid\", \"lyrical\", \"instrumental\", or not passed to choose a random folder.");
                 }
             }
 
@@ -137,6 +140,32 @@ public class Program {
 
 			return Results.Content("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, viewport-fit=cover\"><title>" + displayName + "</title></head><body style=\"background: black; color: white; display: flex; justify-content: center; align-items: center; min-height: 100dvh; margin: 0; font-family: rockwell;\"><div style=\"display: flex; flex-direction: column; text-align: center;\"><h1>" + displayName + "</h1><audio controls autoplay style=\"margin-left: auto; margin-right: auto;\" src=\"/getsong?filename=" + escapedFile + "\"></audio><img style=\"width: 640px; height: 480px;\" src=\"/getcover?filename=" + escapedFile + "\"></div></body></html>", "text/html; charset=utf-8");
         });
+
+        app.MapGet("/getcover", async (string filename) => {
+			string folderPath = "C:\\Users\\Kiwian\\Music\\";
+			string fullPath = Path.Combine(folderPath, filename);
+            if (!File.Exists(fullPath)) {
+                return Results.NotFound("No song with that filename was found.");
+            }
+
+			using TagLib.File file = TagLib.File.Create(fullPath);
+			TagLib.IPicture? firstPicture = file.Tag.Pictures.FirstOrDefault();
+			if (firstPicture != null) {
+				byte[] imageData = firstPicture.Data.Data;
+				return Results.Bytes(imageData, firstPicture.MimeType);
+			}
+
+			return Results.InternalServerError("The selected song did not contain a cover image to extract.");
+		});
+
+        app.MapGet("/getsong", async (string filename) => {
+            string fullPath = Path.Combine("C:\\Users\\Kiwian\\Music\\", filename);
+			if (!File.Exists(fullPath)) {
+                return Results.NotFound("No song with that filename was found.");
+            }
+
+			return Results.File(fullPath, "audio/mpeg");
+		});
 
         app.MapGet("/getao3storyid", async (HttpContext context, string storyTitle, int page) => {
             Console.WriteLine("AO3 | Getting story ID from searching \"" + storyTitle + "\" on page " + page);
@@ -225,25 +254,22 @@ public class Program {
                 }
 
                 profilePictureUrl = await response.Content.ReadAsStringAsync();
+
 			} catch (Exception error) {
                 Console.WriteLine("PTC | Error while processing profile picture: \"" + error.ToString() + "\"");
                 return ServerError("Failed to process uploaded profile picture. Please try again. If the issue persists, please contact KiwianDoesThings with your profile picture (You can see my contact info on my main website \"kiwiandoesthings.place\"");
             }
 
-            SqliteCommand queryCommand = database!.CreateCommand();
+            using SqliteCommand queryCommand = database!.CreateCommand();
             queryCommand.CommandText = "SELECT username FROM users WHERE username = $username";
             queryCommand.Parameters.AddWithValue("$username", username);
-            SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
             while (await reader.ReadAsync()) {
-                queryCommand.Dispose();
-                reader.Dispose();
                 return BadRequest("There is already a user with that username.");
             }
-            queryCommand.Dispose();
-            reader.Dispose();
 
-            SqliteCommand registerCommand = database!.CreateCommand();
-            registerCommand.CommandText = "INSERT INTO users (user_id, username, color, password, secret, info) VALUES ($userID, $username, $userColor, $userPassword, $userSecret, $info);";
+            using SqliteCommand registerCommand = database!.CreateCommand();
+            registerCommand.CommandText = "INSERT INTO users (user_id, username, color, password, secret, profile_picture_link info) VALUES ($userID, $username, $userColor, $userPassword, $userSecret, $profilePictureLink, $info);";
             registerCommand.Parameters.AddWithValue("$userID", userID.ToString());
             registerCommand.Parameters.AddWithValue("$username", username);
             registerCommand.Parameters.AddWithValue("$userColor", color);
@@ -252,9 +278,9 @@ public class Program {
             byte[] hashBytes = SHA256.HashData(inputBytes);
             string userSecret = Convert.ToBase64String(hashBytes);
             registerCommand.Parameters.AddWithValue("$userSecret", userSecret);
+            registerCommand.Parameters.AddWithValue("$profilePictureLink", profilePictureUrl);
             //registerCommand.Parameters.AddWithValue("$info", info);
-            registerCommand.ExecuteNonQuery();
-            registerCommand.Dispose();
+            await registerCommand.ExecuteNonQueryAsync();
 
             return Results.Ok(new {
                 userID = userID.ToString(),
@@ -267,11 +293,11 @@ public class Program {
             Console.WriteLine("PTC | Attempted login with username: " + username + " and password: " + password);
 			Console.WriteLine("PTC | From " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
 
-			SqliteCommand queryCommand = database!.CreateCommand();
+			using SqliteCommand queryCommand = database!.CreateCommand();
             queryCommand.CommandText = "SELECT user_id, secret FROM users WHERE username = $username AND password = $password";
             queryCommand.Parameters.AddWithValue("$username", username);
             queryCommand.Parameters.AddWithValue("$password", password);
-            SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
             object? result = null;
             if (await reader.ReadAsync()) {
                 string userID = reader.GetString(0);
@@ -283,17 +309,14 @@ public class Program {
                 };
             }
 
-            reader.Dispose();
-            queryCommand.Dispose();
-
             return result != null ? Results.Ok(result) : NotFound("No user with that login information was found");
         });
 
         app.MapGet("/request_userInfo", async (string userID) => {
-            SqliteCommand queryCommand = database!.CreateCommand();
+            using SqliteCommand queryCommand = database!.CreateCommand();
             queryCommand.CommandText = "SELECT username, color, created_at FROM users WHERE user_id = $userID";
             queryCommand.Parameters.AddWithValue("$userID", userID);
-            SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
             object? result = null;
             while (await reader.ReadAsync()) {
                 result = new {
@@ -303,34 +326,42 @@ public class Program {
                 };
             }
 
-            reader.Dispose();
-            queryCommand.Dispose();
-
             return result != null ? Results.Ok(result) : NotFound("No user with that ID was found");
         });
 
+        app.MapGet("/request_userProfile", async (string userID) => {
+            using SqliteCommand queryCommand = database!.CreateCommand();
+            queryCommand.CommandText = "SELECT profile_picture_link FROM users WHERE user_id = $userID";
+            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            if (await reader.ReadAsync()) {
+				return Results.Ok(new {
+                    profilePictureUrl = reader.GetString(0)
+                });
+			}
+
+            return BadRequest("No user with that ID was found");
+        });
+
         app.MapGet("/request_roomID", async (string roomName) => {
-            SqliteCommand queryCommand = database!.CreateCommand();
+            using SqliteCommand queryCommand = database!.CreateCommand();
             queryCommand.CommandText = "SELECT id FROM rooms WHERE name = $roomName";
             queryCommand.Parameters.AddWithValue("$roomName", roomName);
-            SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
             object? result = null;
             if (await reader.ReadAsync()) {
                 result = new {
                     roomID = reader.GetInt32(0)
                 };
             }
-            reader.Dispose();
-            queryCommand.Dispose();
 
             return result != null ? Results.Ok(result) : NotFound("No room with that name was found");
 		});
 
         app.MapGet("/request_roomInfo", async (int roomID) => {
-            SqliteCommand queryCommand = database!.CreateCommand();
+            using SqliteCommand queryCommand = database!.CreateCommand();
             queryCommand.CommandText = "SELECT name, author_id, privacy, created_at FROM rooms WHERE id = $roomID";
             queryCommand.Parameters.AddWithValue("$roomID", roomID);
-            SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
             object? result = null;
             if (await reader.ReadAsync()) {
                 result = new {
@@ -340,8 +371,6 @@ public class Program {
                     createdAt = reader.GetString(3)
                 };
             }
-            reader.Dispose();
-            queryCommand.Dispose();
 
             return result != null ? Results.Ok(result) : NotFound("No room with that ID was found");
         });
@@ -356,17 +385,15 @@ public class Program {
 				return LogBadUserSecret(userID, userSecret);
 			}
 
-			SqliteCommand queryCommand = database!.CreateCommand();
+			using SqliteCommand queryCommand = database!.CreateCommand();
             queryCommand.CommandText = "SELECT id, name FROM rooms LEFT JOIN roomAccess ON id = room_id AND user_id = $userID WHERE name LIKE $targetName AND name != 'HomeRoom' AND (privacy = 'PUBLIC' OR (privacy = 'PRIVATE' AND access_level >= 0))";
             queryCommand.Parameters.AddWithValue("$targetName", "%" + targetName + "%");
             queryCommand.Parameters.AddWithValue("$userID", userID);
-            SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
             List<RoomResult> results = new();
             while (await reader.ReadAsync()) {
                 results.Add(new RoomResult(reader.GetString(1), reader.GetInt32(0)));
             }
-            reader.Dispose();
-            queryCommand.Dispose();
 
             return Results.Ok(results);
         });
@@ -384,11 +411,10 @@ public class Program {
                 return LogBadUserSecret(userID, userSecret);
 			}
 
-			SqliteCommand deleteCommand = database!.CreateCommand();
+			using SqliteCommand deleteCommand = database!.CreateCommand();
 			deleteCommand.CommandText = "DELETE FROM users WHERE user_id = $userID";
 			deleteCommand.Parameters.AddWithValue("$userID", userID);
-			deleteCommand.ExecuteNonQuery();
-			deleteCommand.Dispose();
+			await deleteCommand.ExecuteNonQueryAsync();
 
             AppendUserLoginfo(context, "", "");
 
@@ -451,12 +477,11 @@ public class Program {
                 return BadRequest("Privacy must be either PUBLIC or PRIVATE, instead found \"" + newPrivacy + "\"");
 			}
 
-			SqliteCommand roomCommand = Program.database!.CreateCommand();
+			using SqliteCommand roomCommand = Program.database!.CreateCommand();
 			roomCommand.CommandText = "UPDATE rooms SET privacy = $newPrivacy WHERE id = $roomID";
 			roomCommand.Parameters.AddWithValue("$newPrivacy", newPrivacy.ToUpper());
 			roomCommand.Parameters.AddWithValue("$roomID", roomID);
-			roomCommand.ExecuteNonQuery();
-			roomCommand.Dispose();
+			await roomCommand.ExecuteNonQueryAsync();
 
             return Results.Ok();
 		});
@@ -468,26 +493,24 @@ public class Program {
         });
 
         app.MapGet("/request_usersWithAccessLevel", async (int accessLevel, int roomID) => {
-            SqliteCommand queryCommand = database!.CreateCommand();
+            using SqliteCommand queryCommand = database!.CreateCommand();
             queryCommand.CommandText = "SELECT user_id FROM roomAccess WHERE room_id = $roomID AND access_level = $accessLevel";
             queryCommand.Parameters.AddWithValue("$roomID", roomID);
             queryCommand.Parameters.AddWithValue("$accessLevel", accessLevel);
-            SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
             List<string> results = new();
             while (await reader.ReadAsync()) {
                 results.Add(reader.GetString(0));
             }
-            reader.Dispose();
-            queryCommand.Dispose();
 
             return Results.Ok(results);
         });
 
         app.MapGet("/request_userID", async (string userName) => {
-            SqliteCommand queryCommand = database!.CreateCommand();
+            using SqliteCommand queryCommand = database!.CreateCommand();
             queryCommand.CommandText = "SELECT user_id FROM users WHERE username = $userName";
             queryCommand.Parameters.AddWithValue("$userName", userName);
-            SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
             if (await reader.ReadAsync()) {
                 return Results.Ok(new {
                     userID = reader.GetString(0)
@@ -515,13 +538,12 @@ public class Program {
                 return Unauthorized("You do not have moderator permissions in this room!");
             }
 
-            SqliteCommand setCommand = database!.CreateCommand();
+            using SqliteCommand setCommand = database!.CreateCommand();
             setCommand.CommandText = "INSERT INTO roomAccess (room_id, user_id, access_level) VALUES ($roomID, $userID, $accessLevel) ON CONFLICT(room_id, user_id) DO UPDATE SET access_level = $accessLevel";
             setCommand.Parameters.AddWithValue("$roomID", roomID);
             setCommand.Parameters.AddWithValue("$userID", otherID);
             setCommand.Parameters.AddWithValue("$accessLevel", accessLevel);
             await setCommand.ExecuteNonQueryAsync();
-            setCommand.Dispose();
 
             return Results.Ok();
 		});
@@ -545,25 +567,6 @@ public class Program {
         app.Run();
     }
 
-	public static IResult GetSong(string filename) {
-		return Results.File(Path.Combine("C:\\Users\\Kiwian\\Music\\", filename), "audio/mpeg");
-	}
-
-	public static IResult GetCover(string filename) {
-		string folderPath = "C:\\Users\\Kiwian\\Music\\";
-		string fullPath = Path.Combine(folderPath, filename);
-
-		TagLib.File file = TagLib.File.Create(fullPath);
-		TagLib.IPicture? firstPicture = file.Tag.Pictures.FirstOrDefault();
-		file.Dispose();
-		if (firstPicture != null) {
-			byte[] imageData = firstPicture.Data.Data;
-			return Results.Bytes(imageData, firstPicture.MimeType);
-		}
-
-		return Results.NotFound();
-	}
-
 	public static IResult GetAo3ApiResponse(string file, string[] args) {
         ProcessStartInfo start = new ProcessStartInfo();
         start.FileName = "python";
@@ -586,20 +589,18 @@ public class Program {
     }
 
     public static int CreateRoom(string roomName, string ownerID) {
-		SqliteCommand roomCommand = database!.CreateCommand();
+		using SqliteCommand roomCommand = database!.CreateCommand();
 		roomCommand.CommandText = "INSERT INTO rooms (name, author_id) VALUES ($roomName, $authorID); SELECT last_insert_rowid();";
 		roomCommand.Parameters.AddWithValue("$roomName", roomName);
 		roomCommand.Parameters.AddWithValue("$authorID", ownerID);
 		int roomID = (int)(long)roomCommand.ExecuteScalar()!;
-		roomCommand.Dispose();
 
-		SqliteCommand accessCommand = database!.CreateCommand();
+		using SqliteCommand accessCommand = database!.CreateCommand();
 		accessCommand.CommandText = "INSERT INTO roomAccess (room_id, user_id, access_level) VALUES ($roomID, $userID, $accessLevel)";
 		accessCommand.Parameters.AddWithValue("$roomID", roomID);
 		accessCommand.Parameters.AddWithValue("$userID", ownerID);
 		accessCommand.Parameters.AddWithValue("$accessLevel", 2);
-		accessCommand.ExecuteNonQuery();
-		accessCommand.Dispose();
+	    accessCommand.ExecuteNonQueryAsync();
 
 		return roomID;
 	}
@@ -639,14 +640,12 @@ public class Program {
 	}
 
 	public static async Task<string> GetUserSecret(string userID) {
-		SqliteCommand getCommand = database!.CreateCommand();
+		using SqliteCommand getCommand = database!.CreateCommand();
 		getCommand.CommandText = "SELECT secret FROM users WHERE user_id = $userID LIMIT 1";
 		getCommand.Parameters.AddWithValue("$userID", userID);
 		object? result = await getCommand.ExecuteScalarAsync()!;
-		getCommand.Dispose();
 
 		if (result != null && result != DBNull.Value) {
-			getCommand.Dispose();
 			return result.ToString()!.TrimEnd("=").ToString();
 		}
 
@@ -654,25 +653,23 @@ public class Program {
 	}
 
     public static async Task<bool> GetUserIDExists(string userID) {
-        SqliteCommand queryCommand = database!.CreateCommand();
+        using SqliteCommand queryCommand = database!.CreateCommand();
 		queryCommand.CommandText = "SELECT 1 FROM users WHERE user_id = $userID";
 		queryCommand.Parameters.AddWithValue("$userID", userID);
 		object? result = await queryCommand.ExecuteScalarAsync();
-		queryCommand.Dispose();
 
         return result != null;
     }
 
     public static async Task<int> GetRoomID(string roomName) {
-        SqliteCommand queryCommand = database!.CreateCommand();
+        using SqliteCommand queryCommand = database!.CreateCommand();
         queryCommand.CommandText = "SELECT id FROM rooms WHERE name = $roomName";
         queryCommand.Parameters.AddWithValue("$roomName", roomName);
-        SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+        using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
         object? result = null;
         if (await reader.ReadAsync()) {
             result = reader.GetInt32(0);
         }
-        queryCommand.Dispose();
 
         return result != null ? (int)result : -1;
     }
@@ -685,15 +682,13 @@ public class Program {
 			return 0;
 		}
 
-		SqliteCommand getCommand = Program.database!.CreateCommand();
+		using SqliteCommand getCommand = Program.database!.CreateCommand();
 		getCommand.CommandText = "SELECT access_level FROM roomAccess WHERE user_id = $userID AND room_id = $roomID";
 		getCommand.Parameters.AddWithValue("$userID", userID);
 		getCommand.Parameters.AddWithValue("$roomID", roomID);
 		object? result = await getCommand.ExecuteScalarAsync()!;
-		getCommand.Dispose();
 
 		if (result != null && result != DBNull.Value) {
-			getCommand.Dispose();
 			return (int)(long)result;
 		}
 
