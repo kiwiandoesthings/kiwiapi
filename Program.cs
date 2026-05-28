@@ -7,14 +7,21 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
+using SixLabors.ImageSharp;
 
 public class Program {
+    public static SqliteConnection? database;
     private static SocketsHttpHandler? handler;
     private static HttpClient? client;
-    public static SqliteConnection? database;
     private record RoomResult(string roomName, int roomID);
+    private static string? catboxHash = Environment.GetEnvironmentVariable("CATBOX_USER_HASH");
 
-    public static void Main(string[] args) {
+	public static void Main(string[] args) {
+		if (catboxHash == null) {
+            Console.WriteLine("Could not find environment variable \"CATBOX_USER_HASH\"");
+            return;
+        }
+
         string connectionString = "Data Source=" + "C:\\Users\\Kiwian\\Downloads\\Github Repos\\kiwiapi\\protocall.db";
         database = new SqliteConnection(connectionString);
         database.Open();
@@ -154,13 +161,20 @@ public class Program {
             return Results.File(file, "image/gif");
         });
         
-        app.MapPost("/push_registerAccount", async (HttpRequest request, string username, string password, string color, string info) => {
+        app.MapPost("/push_registerAccount", async (HttpRequest request, string username, string password, string color, IFormFile profilePicture) => {
             Console.WriteLine("PTC | Attempting registration with username \"" + username + "\", password \"" + password + "\", and color \"" + color + "\"");
 			Console.WriteLine("PTC | From " + request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + request.Headers.UserAgent.ToString());
+
+			string[] allowedMimeTypes = { "image/jpeg", "image/png", "image/gif" };
+            string profilePictureType = profilePicture == null ? "" : profilePicture.ContentType.ToLower();
+            long profilePictureSize = profilePicture == null ? long.MaxValue : profilePicture.Length;
+            string profilePictureUrl = "";
 
 			bool filledOut = username != "" && password != "" && color != "";
             bool validInformation = ValidUsername(username) && ValidUsername(password);
             bool validColor = ValidHex(color) && ValidUserColor(color);
+            bool uploadedProfilePicture = profilePicture != null && profilePicture.Length >= 0;
+            bool validProfilePicture = allowedMimeTypes.Contains(profilePictureType) && profilePictureSize <= 10 * 1024 * 1024;
 
             string errorMessage = "";
             if (!filledOut) {
@@ -176,8 +190,48 @@ public class Program {
                     errorMessage += "Color is too dark.";
                 }
             }
+            if (!uploadedProfilePicture) {
+                errorMessage += "You must add a profile picture! ";
+            } else if (validProfilePicture) {
+                errorMessage += "Your profile picture must be smaller than 10MiB and be one of the supported formats: \"gif, png, jpg\"";
+            }
             if (errorMessage != "") {
                 return BadRequest(errorMessage);
+            }
+
+			Guid userID = Guid.NewGuid();
+
+			try {
+				using (Stream incomingStream = profilePicture!.OpenReadStream()) {
+					ImageInfo imageInfo = await Image.IdentifyAsync(incomingStream);
+
+					if (imageInfo == null) {
+                        return BadRequest("Invalid or corrupted image file.");
+					}
+
+					if (imageInfo.Width != 512 || imageInfo.Height != 512) {
+						return BadRequest("Resolution does not match required resolution of 512x512.");
+					}
+				}
+
+				using Stream stream = profilePicture!.OpenReadStream();
+                using StreamContent content = new StreamContent(stream);
+                content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(profilePicture.ContentType);
+
+                using MultipartFormDataContent uploadRequest = new MultipartFormDataContent();
+				uploadRequest.Add(new StringContent("fileupload"), "reqtype");
+                uploadRequest.Add(content, "fileToUpload", "profile_picture_" + userID.ToString());
+                uploadRequest.Add(new StringContent(catboxHash), "userhash");
+                using HttpResponseMessage response = await client!.PostAsync("https://catbox.moe/user/api.php", uploadRequest);
+
+                if (!response.IsSuccessStatusCode) {
+                    return ServerError("Failed to upload profile picture to file host service. Please try again.");
+                }
+
+                profilePictureUrl = await response.Content.ReadAsStringAsync();
+			} catch (Exception error) {
+                Console.WriteLine("PTC | Error while processing profile picture: \"" + error.ToString() + "\"");
+                return ServerError("Failed to process uploaded profile picture. Please try again. If the issue persists, please contact KiwianDoesThings with your profile picture (You can see my contact info on my main website \"kiwiandoesthings.place\"");
             }
 
             SqliteCommand queryCommand = database!.CreateCommand();
@@ -194,7 +248,6 @@ public class Program {
 
             SqliteCommand registerCommand = database!.CreateCommand();
             registerCommand.CommandText = "INSERT INTO users (user_id, username, color, password, secret, info) VALUES ($userID, $username, $userColor, $userPassword, $userSecret, $info);";
-            Guid userID = Guid.NewGuid();
             registerCommand.Parameters.AddWithValue("$userID", userID.ToString());
             registerCommand.Parameters.AddWithValue("$username", username);
             registerCommand.Parameters.AddWithValue("$userColor", color);
@@ -203,7 +256,7 @@ public class Program {
             byte[] hashBytes = SHA256.HashData(inputBytes);
             string userSecret = Convert.ToBase64String(hashBytes);
             registerCommand.Parameters.AddWithValue("$userSecret", userSecret);
-            registerCommand.Parameters.AddWithValue("$info", info);
+            //registerCommand.Parameters.AddWithValue("$info", info);
             registerCommand.ExecuteNonQuery();
             registerCommand.Dispose();
 
@@ -212,6 +265,7 @@ public class Program {
                 userSecret = userSecret
             });
         });
+
 
         app.MapGet("/request_loginInfo", async (HttpContext context, string username, string password) => {
             Console.WriteLine("PTC | Attempted login with username: " + username + " and password: " + password);
@@ -735,6 +789,15 @@ public class Program {
             "text/plain",
             System.Text.Encoding.UTF8,
             statusCode: 400
+        );
+    }
+
+    public static IResult ServerError(string error) {
+        return Results.Content(
+            error,
+            "text/plain",
+            System.Text.Encoding.UTF8,
+            statusCode: 500
         );
     }
 
