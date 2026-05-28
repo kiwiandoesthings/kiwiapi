@@ -161,9 +161,9 @@ public class Program {
             return Results.File(file, "image/gif");
         });
         
-        app.MapPost("/push_registerAccount", async (HttpRequest request, string username, string password, string color, IFormFile profilePicture) => {
+        app.MapPost("/push_registerAccount", async (HttpContext context, string username, string password, string color, IFormFile profilePicture) => {
             Console.WriteLine("PTC | Attempting registration with username \"" + username + "\", password \"" + password + "\", and color \"" + color + "\"");
-			Console.WriteLine("PTC | From " + request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + request.Headers.UserAgent.ToString());
+			Console.WriteLine("PTC | From " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
 
 			string[] allowedMimeTypes = { "image/jpeg", "image/png", "image/gif" };
             string profilePictureType = profilePicture == null ? "" : profilePicture.ContentType.ToLower();
@@ -256,7 +256,7 @@ public class Program {
             byte[] hashBytes = SHA256.HashData(inputBytes);
             string userSecret = Convert.ToBase64String(hashBytes);
             registerCommand.Parameters.AddWithValue("$userSecret", userSecret);
-            //registerCommand.Parameters.AddWithValue("$info", info);
+            registerCommand.Parameters.AddWithValue("$info", GetDeviceInfo(context));
             registerCommand.ExecuteNonQuery();
             registerCommand.Dispose();
 
@@ -527,18 +527,6 @@ public class Program {
             return Results.Ok();
         });
 
-        app.MapGet("/request_deviceInfo", (HttpContext context) => {
-            string? ip = context.Request.Headers["CF-Connecting-IP"].FirstOrDefault();
-
-            if (string.IsNullOrEmpty(ip)) {
-                ip = context.Connection.RemoteIpAddress?.ToString();
-            }
-
-            return Results.Ok(new {
-                id = ip + " ||| " + context.Request.Headers.UserAgent.ToString()
-            });
-        });
-
         app.MapHub<ProtoCall>("/protocall");
 
         app.MapControllers();
@@ -584,6 +572,16 @@ public class Program {
                 return Results.Content(result, "application/json");
             }
         }
+    }
+
+    public static string GetDeviceInfo(HttpContext context) {
+        string? ip = context.Request.Headers["CF-Connecting-IP"].FirstOrDefault();
+
+        if (string.IsNullOrEmpty(ip)) {
+            ip = context.Connection.RemoteIpAddress?.ToString();
+        }
+
+        return ip + " ||| " + context.Request.Headers.UserAgent.ToString();
     }
 
     public static int CreateRoom(string roomName, string ownerID, bool isPublic) {
