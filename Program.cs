@@ -159,18 +159,22 @@ public class Program {
 			Console.WriteLine("PTC | From " + request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + request.Headers.UserAgent.ToString());
 
 			bool filledOut = username != "" && password != "" && color != "";
-            bool validInformation = ValidString(username) && ValidString(password) && ValidHex(color);
-            bool validUsernameAndColor = username.ToLower() != "system" && username.ToLower() != "unknown user" && color != "000000";
+            bool validInformation = ValidUsername(username) && ValidUsername(password);
+            bool validColor = ValidHex(color) && ValidUserColor(color);
 
             string errorMessage = "";
             if (!filledOut) {
                 errorMessage += "Login information is incomplete. ";
             }
             if (!validInformation) {
-                errorMessage += "Login information is invalid. ";
+                errorMessage += ("Username and password can only use \"A-z, 0-9, -, _\", and must be greater than 3 characters and shorter than 18, and cannot be \"System\" or \"Unknown User\". ");
             }
-            if (!validUsernameAndColor) {
-                errorMessage += "Username and/or color are using restricted values (username cannot be \"System\" or \"Unknown User\" and color cannot be black).";
+            if (!validColor) {
+                if (!ValidHex(color)) {
+                    errorMessage += "Color is not a valid hex value.";
+                } else {
+                    errorMessage += "Color is too dark.";
+                }
             }
             if (errorMessage != "") {
                 return BadRequest(errorMessage);
@@ -293,19 +297,15 @@ public class Program {
         });
 
         app.MapGet("/request_roomSearch", async (HttpContext context, string targetName) => {
-            if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
-                return CouldNotGetAuth();
-			}
+            AuthenticationResult auth = await IsAuthentic(context);
+            if (!auth) {
+                return auth.error;
+            }
 
-			bool error = await GoodSecret(userID, userSecret);
-			if (error) {
-				return LogBadUserSecret(userID, userSecret);
-			}
-
-			SqliteCommand queryCommand = database!.CreateCommand();
+            SqliteCommand queryCommand = database!.CreateCommand();
             queryCommand.CommandText = "SELECT id, name FROM rooms LEFT JOIN roomAccess ON id = room_id AND user_id = $userID WHERE name LIKE $targetName AND name != 'HomeRoom' AND (privacy = 'PUBLIC' OR (privacy = 'PRIVATE' AND access_level >= 0))";
             queryCommand.Parameters.AddWithValue("$targetName", "%" + targetName + "%");
-            queryCommand.Parameters.AddWithValue("$userID", userID);
+            queryCommand.Parameters.AddWithValue("$userID", auth.userID);
             SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
             List<RoomResult> results = new();
             while (await reader.ReadAsync()) {
@@ -318,21 +318,17 @@ public class Program {
         });
 
         app.MapPost("/push_deleteAccount", async (HttpContext context) => {
-            if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
-				return CouldNotGetAuth();
-			}
+            AuthenticationResult auth = await IsAuthentic(context);
+            if (!auth) {
+                return auth.error;
+            }
 
-            Console.WriteLine("PTC | Attempting to delete account with userID \"" + userID + "\", and userSecret \"" + userSecret + "\"");
+            Console.WriteLine("PTC | Attempting to delete account with userID \"" + auth.userID + "\", and userSecret \"" + auth.userSecret + "\"");
 			Console.WriteLine("PTC | From " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
-
-			bool error = await GoodSecret(userID, userSecret);
-			if (error) {
-                return LogBadUserSecret(userID, userSecret);
-			}
 
 			SqliteCommand deleteCommand = database!.CreateCommand();
 			deleteCommand.CommandText = "DELETE FROM users WHERE user_id = $userID";
-			deleteCommand.Parameters.AddWithValue("$userID", userID);
+			deleteCommand.Parameters.AddWithValue("$userID", auth.userID);
 			deleteCommand.ExecuteNonQuery();
 			deleteCommand.Dispose();
 
@@ -342,16 +338,13 @@ public class Program {
 		});
 
         app.MapPost("/push_createRoomPersonal", async (HttpContext context, string otherID) => {
-            if (GetUserInfo(context, out string authorID, out string authorSecret) == -1) {
-				return CouldNotGetAuth();
-			}
+            AuthenticationResult auth = await IsAuthentic(context);
+            if (!auth) {
+                return auth.error;
+            }
 
-            bool error = await GoodSecret(authorID, authorSecret);
-			if (error) {
-				return LogBadUserSecret(authorID, authorSecret);
-			}
-
-            int roomID = CreateRoom(authorID + " " + otherID, authorID);
+            int roomID = CreateRoom(auth.userID + " " + otherID, auth.userID, false);
+            
 
             return Results.Ok(new {
 				roomID = roomID,
@@ -359,19 +352,15 @@ public class Program {
 		});
 
         app.MapPost("/push_createRoom", async (HttpContext context, string roomName) => {
-            if (GetUserInfo(context, out string authorID, out string authorSecret) == -1) {
-                return CouldNotGetAuth();
-            }
-
-            bool error = await GoodSecret(authorID, authorSecret);
-            if (error) {
-                return LogBadUserSecret(authorID, authorSecret);
+            AuthenticationResult auth = await IsAuthentic(context);
+            if (!auth) {
+                return auth.error;
             }
 
             if (await GetRoomID(roomName) != -1) {
                 return BadRequest("A room with that name already exists!");
             }
-            int roomID = CreateRoom(roomName, authorID);
+            int roomID = CreateRoom(roomName, auth.userID, true);
 
             return Results.Ok(new {
                 roomID = roomID
@@ -379,16 +368,12 @@ public class Program {
         });
 
         app.MapPost("/push_setRoomPrivacy", async (HttpContext context, int roomID, string newPrivacy) => {
-            if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
-				return CouldNotGetAuth();
-			}
+            AuthenticationResult auth = await IsAuthentic(context);
+            if (!auth) {
+                return auth.error;
+            }
 
-            bool error = await GoodSecret(userID, userSecret);
-			if (error) {
-				return LogBadUserSecret(userID, userSecret);
-			}
-
-			if (await UserAccessLevelInRoom(userID, roomID) < 2) {
+            if (await UserAccessLevelInRoom(auth.userID, roomID) < 2) {
 				return Unauthorized("You do not have moderator permissions in this room!");
 			}
 
@@ -444,20 +429,16 @@ public class Program {
         });
 
         app.MapPost("/push_setUserAccess", async (HttpContext context, string otherID, int accessLevel, int roomID) => {
-			if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
-                return CouldNotGetAuth();
-			}
-
             if (!await GetUserIDExists(otherID)) {
                 return BadRequest("No user with that ID was found");
             }
 
-			bool error = await GoodSecret(userID, userSecret);
-			if (error) {
-				return LogBadUserSecret(userID, userSecret);
-			}
+            AuthenticationResult auth = await IsAuthentic(context);
+            if (!auth) {
+                return auth.error;
+            }
 
-			if (await UserAccessLevelInRoom(userID, roomID) < 2) {
+            if (await UserAccessLevelInRoom(auth.userID, roomID) < 2) {
                 return Unauthorized("You do not have moderator permissions in this room!");
             }
 
@@ -471,6 +452,26 @@ public class Program {
 
             return Results.Ok();
 		});
+
+        app.MapPost("/push_setUserUsername", async (HttpContext context, string newUsername) => {
+            AuthenticationResult auth = await IsAuthentic(context);
+            if (!auth) {
+                return auth.error;
+            }
+
+            if (!ValidUsername(newUsername)) {
+                return BadRequest("Username can only use \"A-z, 0-9, -, _\", and must be greater than 3 characters and shorter than 18. You may not name yourself \"System\" or \"Unknown User\".");
+            }
+
+            SqliteCommand command = database!.CreateCommand();
+            command.CommandText = "UPDATE users SET username = $newUsername WHERE user_id = $userID";
+            command.Parameters.AddWithValue("$newUsername", newUsername);
+            command.Parameters.AddWithValue("$userID", auth.userID);
+            await command.ExecuteNonQueryAsync();
+            command.Dispose();
+
+            return Results.Ok();
+        });
 
         app.MapGet("/request_deviceInfo", (HttpContext context) => {
             string? ip = context.Request.Headers["CF-Connecting-IP"].FirstOrDefault();
@@ -531,11 +532,12 @@ public class Program {
         }
     }
 
-    public static int CreateRoom(string roomName, string ownerID) {
+    public static int CreateRoom(string roomName, string ownerID, bool isPublic) {
 		SqliteCommand roomCommand = database!.CreateCommand();
-		roomCommand.CommandText = "INSERT INTO rooms (name, author_id) VALUES ($roomName, $authorID); SELECT last_insert_rowid();";
+		roomCommand.CommandText = "INSERT INTO rooms (name, author_id, privacy) VALUES ($roomName, $authorID, $isPublic); SELECT last_insert_rowid();";
 		roomCommand.Parameters.AddWithValue("$roomName", roomName);
 		roomCommand.Parameters.AddWithValue("$authorID", ownerID);
+		roomCommand.Parameters.AddWithValue("$isPublic", isPublic ? "PUBLIC" : "PRIVATE");
 		int roomID = (int)(long)roomCommand.ExecuteScalar()!;
 		roomCommand.Dispose();
 
@@ -552,7 +554,7 @@ public class Program {
 
 	public static async Task<bool> GoodSecret(string userID, string userSecret) {
 		string realSecret = await GetUserSecret(userID);
-		if (realSecret != ProcessSecret(userSecret)) {
+		if (realSecret != ProcessSecret(userSecret, true)) {
 			Console.WriteLine("API | Passed secret did not match real secret of " + realSecret);
 			return true;
 		}
@@ -561,7 +563,7 @@ public class Program {
 	}
 
 	public static async Task<bool> VerifyRequest(ISingleClientProxy client, string userID, string userSecret, string requestType) {
-        string trimmedSecret = ProcessSecret(userSecret);
+        string trimmedSecret = ProcessSecret(userSecret, false);
 		string realSecret = await GetUserSecret(userID);
 		if (realSecret != trimmedSecret) {
 			Console.WriteLine("WSS | Passed secret \"" + trimmedSecret + "\" did not match real secret of " + realSecret);
@@ -572,17 +574,36 @@ public class Program {
 		return false;
 	}
 
-    public static string ProcessSecret(string originalSecret) {
-        return WebUtility.UrlDecode(new string(originalSecret.TrimEnd("=")));
+    public static string ProcessSecret(string originalSecret, bool decode) {
+        string newSecret = new string(originalSecret.TrimEnd("="));
+        if (decode) {
+            newSecret = WebUtility.UrlDecode(newSecret);
+        }
+        return newSecret;
     }
 
 	public static bool ValidString(string toCheck) {
-		return Regex.IsMatch(toCheck, @"^[a-zA-Z0-9\-_]+$") && toCheck.Length <= 18;
+		return Regex.IsMatch(toCheck, @"^[a-zA-Z0-9\-_]+$");
 	}
 
 	public static bool ValidHex(string toCheck) {
-		return Regex.IsMatch(toCheck, @"^#?([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$");
+		return Regex.IsMatch(toCheck, @"^#?([A-Fa-f0-9]{6})$");
 	}
+
+    public static bool ValidUserColor(string hex) {
+        int red = Convert.ToInt32(hex.Substring(0, 2), 16);
+        int green = Convert.ToInt32(hex.Substring(2, 2), 16);
+        int blue = Convert.ToInt32(hex.Substring(4, 2), 16);
+
+        double brightness = (red * 0.299) + (green * 0.587) + (blue * 0.114);
+
+        Console.WriteLine("bright " + brightness);
+        return brightness >= 80;
+    }
+
+    public static bool ValidUsername(string username) {
+        return username.Length > 3 && username.Length < 18 && ValidString(username) && username.ToLower() != "system" && username.ToLower() != "unknown user";
+    }
 
 	public static async Task<string> GetUserSecret(string userID) {
 		SqliteCommand getCommand = database!.CreateCommand();
@@ -715,5 +736,51 @@ public class Program {
             System.Text.Encoding.UTF8,
             statusCode: 400
         );
+    }
+
+    public static async Task<AuthenticationResult> IsAuthentic(HttpContext context) {
+        if (GetUserInfo(context, out string userID, out string userSecret) == -1) {
+            return new AuthenticationResult(CouldNotGetAuth());
+        }
+
+        bool goodSecret = await GoodSecret(userID, userSecret);
+        if (goodSecret) {
+            return new AuthenticationResult(LogBadUserSecret(userID, userSecret));
+        }
+
+        return new AuthenticationResult(true, Results.Ok(), userID, userSecret);
+    }
+
+    public struct AuthenticationResult {
+        public bool isValid;
+        public IResult error;
+        public string userID;
+        public string userSecret;
+
+        public AuthenticationResult(bool isValid, IResult error, string userID, string userSecret) {
+            this.isValid = isValid;
+            this.error = error;
+            this.userID = userID;
+            this.userSecret = userSecret;
+        }
+
+        public AuthenticationResult(IResult error) {
+            isValid = false;
+            this.error = error;
+            userID = string.Empty;
+            userSecret = string.Empty;
+        }
+
+        public static bool operator !(AuthenticationResult auth) {
+            return !auth.isValid;
+        }
+
+        public static bool operator true(AuthenticationResult auth) {
+            return auth.isValid;
+        }
+
+        public static bool operator false(AuthenticationResult auth) {
+            return !auth.isValid;
+        }
     }
 }
