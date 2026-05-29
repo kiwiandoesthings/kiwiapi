@@ -13,8 +13,7 @@ public class ProtoCall : Hub {
             return;
         }
 
-        bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "connection");
-        if (error) {
+        if (await Program.VerifyRequest(Clients.Caller, userID, userSecret, "connection")) {
             Context.Abort();
 			Program.LogBadUserSecret(userID, userSecret);
 			return;
@@ -34,8 +33,7 @@ public class ProtoCall : Hub {
             return;
         }
 
-        bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "connection");
-		if (error) {
+		if (await Program.VerifyRequest(Clients.Caller, userID, userSecret, "connection")) {
 			Program.LogBadUserSecret(userID, userSecret);
 			return;
 		}
@@ -55,8 +53,7 @@ public class ProtoCall : Hub {
             return;
         }
 
-		bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "message");
-		if (error) {
+		if (await Program.VerifyRequest(Clients.Caller, userID, userSecret, "message")) {
             Program.LogBadUserSecret(userID, userSecret);
             await Clients.Caller.SendAsync("push_serverMessage", "The server could not authenticate your message. Please clear your cookies and log in again.");
             return;
@@ -69,13 +66,12 @@ public class ProtoCall : Hub {
 
         Console.WriteLine("PTC | Got message from user with ID " + userID + " in room with ID " + roomID + " and content of \"" + message + "\"" + userSecret);
 
-        SqliteCommand idCommand = Program.database!.CreateCommand();
+        using SqliteCommand idCommand = Program.database!.CreateCommand();
         idCommand.CommandText = "SELECT IFNULL(MAX(local_id), 0) + 1 FROM messages WHERE room_id = $roomID";
         idCommand.Parameters.AddWithValue("$roomID", roomID);
         int localID = (int)(long)idCommand.ExecuteScalar()!;
-        idCommand.Dispose();
 
-        SqliteCommand sendCommand = Program.database!.CreateCommand();
+        using SqliteCommand sendCommand = Program.database!.CreateCommand();
         sendCommand.CommandText = "INSERT INTO messages (content, author_id, local_id, room_id, created_at) VALUES ($message, $userID, $localID, $roomID, $messageTimestamp); SELECT last_insert_rowid();";
         sendCommand.Parameters.AddWithValue("$message", message);
         sendCommand.Parameters.AddWithValue("$userID", userID);
@@ -88,7 +84,6 @@ public class ProtoCall : Hub {
             new MessagesData(userID, message, newId, messageTimestamp)
         };
         await Clients.All.SendAsync("push_recieveMessages", messageData);
-        sendCommand.Dispose();
     }
 
     public async Task push_messageRequest(int messageIndex, int messageCount, int roomID) {
@@ -96,8 +91,7 @@ public class ProtoCall : Hub {
             return;
         }
 
-        bool error = await Program.VerifyRequest(Clients.Caller, userID, userSecret, "request");
-		if (error) {
+		if (await Program.VerifyRequest(Clients.Caller, userID, userSecret, "request")) {
 			Program.LogBadUserSecret(userID, userSecret);
 			return;
 		}
@@ -108,21 +102,20 @@ public class ProtoCall : Hub {
         }
 
         if (messageIndex == -1) {
-            SqliteCommand latestIDCommand = Program.database!.CreateCommand();
+            using SqliteCommand latestIDCommand = Program.database!.CreateCommand();
             latestIDCommand.CommandText = "SELECT IFNULL(MAX(Id), 0) FROM Messages";
             messageIndex = (int)(long)latestIDCommand.ExecuteScalar()!;
-            latestIDCommand.Dispose();
         }
 
         List<MessagesData> messages = new();
 
-        SqliteCommand getCommand = Program.database!.CreateCommand();
+        using SqliteCommand getCommand = Program.database!.CreateCommand();
         getCommand.CommandText = "SELECT local_id, content, author_id, created_at FROM (SELECT local_id, content, author_id, created_at FROM messages WHERE local_id <= $messageIndex AND room_id = $roomID ORDER BY local_id DESC LIMIT $amount) ORDER BY local_id ASC";
         getCommand.Parameters.AddWithValue("$messageIndex", messageIndex);
         getCommand.Parameters.AddWithValue("$amount", messageCount);
         getCommand.Parameters.AddWithValue("$roomID", roomID);
 
-        SqliteDataReader reader = await getCommand.ExecuteReaderAsync();
+        using SqliteDataReader reader = await getCommand.ExecuteReaderAsync();
         while (await reader.ReadAsync()) {
             messages.Add(new MessagesData(
                 reader.GetString(2),
@@ -133,7 +126,5 @@ public class ProtoCall : Hub {
 
         }
         await Clients.Caller.SendAsync("push_recieveMessages", messages);
-        getCommand.Dispose();
-        reader.Dispose();
     }
 }
