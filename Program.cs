@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using SixLabors.ImageSharp;
+using Microsoft.AspNetCore.Mvc;
 
 public class Program {
     public static SqliteConnection? database;
@@ -28,7 +29,8 @@ public class Program {
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
         builder.WebHost.UseUrls("http://localhost:5201", "https://localhost:7164");
-		builder.WebHost.ConfigureKestrel(options => {
+        builder.Services.AddAntiforgery();
+        builder.WebHost.ConfigureKestrel(options => {
 			options.AddServerHeader = false;
 		});
 		builder.Services.AddControllers();
@@ -48,8 +50,11 @@ public class Program {
         WebApplication app = builder.Build();
 		//app.UseExceptionHandler("/error");
 		app.UseHsts();
-		app.UseRouting();
         app.UseCors();
+		app.UseRouting();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.UseAntiforgery();
         app.MapOpenApi();
 
         handler = new SocketsHttpHandler() {
@@ -195,7 +200,7 @@ public class Program {
             return Results.File(file, "image/gif");
         });
         
-        app.MapPost("/push_registerAccount", async (HttpContext context, string username, string password, string color, IFormFile profilePicture) => {
+        app.MapPost("/push_registerAccount", async (HttpContext context, [FromForm] string username, [FromForm] string password, [FromForm] string color, [FromForm] IFormFile? profilePicture) => {
             Console.WriteLine("PTC | Attempting registration with username \"" + username + "\", password \"" + password + "\", and color \"" + color + "\"");
 			Console.WriteLine("PTC | From " + context.Request.Headers["CF-Connecting-IP"].FirstOrDefault() + " ||| " + context.Request.Headers.UserAgent.ToString());
 
@@ -205,7 +210,8 @@ public class Program {
             string profilePictureUrl = "";
 
 			bool filledOut = username != "" && password != "" && color != "";
-            bool validInformation = ValidUsername(username) && ValidUsername(password);
+            bool validUsername = ValidUsername(username);
+            bool validPassword = ValidPassword(password);
             bool validColor = ValidHex(color) && ValidUserColor(color);
             bool uploadedProfilePicture = profilePicture != null && profilePicture.Length >= 0;
             bool validProfilePicture = allowedMimeTypes.Contains(profilePictureType) && profilePictureSize <= 10 * 1024 * 1024;
@@ -214,8 +220,11 @@ public class Program {
             if (!filledOut) {
                 errorMessage += "Login information is incomplete. ";
             }
-            if (!validInformation) {
-                errorMessage += ("Username and password can only use \"A-z, 0-9, -, _\", and must be greater than 3 characters and shorter than 18, and cannot be \"System\" or \"Unknown User\". ");
+            if (!validUsername) {
+                errorMessage += "Username can only use \"A-z, 0-9, -, _\", and must be greater than 3 characters and shorter than 19, and cannot be \"System\" or \"Unknown User\". ";
+            }
+            if (!validPassword) {
+                errorMessage += "Password must be longer than 7 characters and shorter than 25, and can only use \"A-z, 0-9, and special characters\".";
             }
             if (!validColor) {
                 if (!ValidHex(color)) {
@@ -226,7 +235,7 @@ public class Program {
             }
             if (!uploadedProfilePicture) {
                 errorMessage += "You must add a profile picture! ";
-            } else if (validProfilePicture) {
+            } else if (!validProfilePicture) {
                 errorMessage += "Your profile picture must be smaller than 10MiB and be one of the supported formats: \"gif, png, jpg\"";
             }
             if (errorMessage != "") {
@@ -254,7 +263,7 @@ public class Program {
 
                 using MultipartFormDataContent uploadRequest = new MultipartFormDataContent();
 				uploadRequest.Add(new StringContent("fileupload"), "reqtype");
-                uploadRequest.Add(content, "fileToUpload", "profile_picture_" + userID.ToString());
+                uploadRequest.Add(content, "fileToUpload", "profile_picture_" + userID.ToString() + Path.GetExtension(profilePicture.FileName));
                 uploadRequest.Add(new StringContent(catboxHash), "userhash");
                 using HttpResponseMessage response = await client!.PostAsync("https://catbox.moe/user/api.php", uploadRequest);
 
@@ -278,7 +287,7 @@ public class Program {
             }
 
             using SqliteCommand registerCommand = database!.CreateCommand();
-            registerCommand.CommandText = "INSERT INTO users (user_id, username, color, password, secret, profile_picture_link info) VALUES ($userID, $username, $userColor, $userPassword, $userSecret, $profilePictureLink, $info);";
+            registerCommand.CommandText = "INSERT INTO users (user_id, username, color, password, secret, profile_picture_link, info) VALUES ($userID, $username, $userColor, $userPassword, $userSecret, $profilePictureLink, $info);";
             registerCommand.Parameters.AddWithValue("$userID", userID.ToString());
             registerCommand.Parameters.AddWithValue("$username", username);
             registerCommand.Parameters.AddWithValue("$userColor", color);
@@ -295,7 +304,7 @@ public class Program {
                 userID = userID.ToString(),
                 userSecret = userSecret
             });
-        });
+        }).DisableAntiforgery();
 
 
         app.MapGet("/request_loginInfo", async (HttpContext context, string username, string password) => {
@@ -340,11 +349,16 @@ public class Program {
 
         app.MapGet("/request_userProfile", async (string userID) => {
             using SqliteCommand queryCommand = database!.CreateCommand();
-            queryCommand.CommandText = "SELECT profile_picture_link FROM users WHERE user_id = $userID";
+            queryCommand.CommandText = "SELECT profile_picture_link, about_me FROM users WHERE user_id = $userID";
+            queryCommand.Parameters.AddWithValue("$userID", userID);
             using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
             if (await reader.ReadAsync()) {
-				return Results.Ok(new {
-                    profilePictureUrl = reader.GetString(0)
+                string? profilePictureUrl = await reader.IsDBNullAsync(0) ? "none" : reader.GetString(0);
+                string aboutMe = await reader.IsDBNullAsync(1) ? "" : reader.GetString(1);
+
+                return Results.Ok(new {
+                    profilePictureUrl = profilePictureUrl,
+                    aboutMe = aboutMe
                 });
 			}
 
@@ -423,7 +437,7 @@ public class Program {
 			}
 
 			using SqliteCommand deleteCommand = database!.CreateCommand();
-			deleteCommand.CommandText = "DELETE FROM users WHERE user_id = $userID";
+			deleteCommand.CommandText = "UPDATE users SET username, color, password, ";
 			deleteCommand.Parameters.AddWithValue("$userID", auth.userID);
 			await deleteCommand.ExecuteNonQueryAsync();
 
@@ -654,6 +668,10 @@ public class Program {
 		return Regex.IsMatch(toCheck, @"^[a-zA-Z0-9\-_]+$");
 	}
 
+    public static bool ValidAdvancedString(string toCheck) {
+        return Regex.IsMatch(toCheck, @"^[\x21-\x7E]$");
+    }
+
 	public static bool ValidHex(string toCheck) {
 		return Regex.IsMatch(toCheck, @"^#?([A-Fa-f0-9]{6})$");
 	}
@@ -670,7 +688,11 @@ public class Program {
     }
 
     public static bool ValidUsername(string username) {
-        return username.Length > 3 && username.Length < 18 && ValidString(username) && username.ToLower() != "system" && username.ToLower() != "unknown user";
+        return username.Length > 3 && username.Length <= 18 && ValidString(username) && username.ToLower() != "system" && username.ToLower() != "unknown user";
+    }
+
+    public static bool ValidPassword(string password) {
+        return password.Length > 7 && password.Length <= 24 && ValidAdvancedString(password);
     }
 
 	public static async Task<string> GetUserSecret(string userID) {
