@@ -23,7 +23,8 @@ public class Program {
             return;
         }
 
-        string connectionString = "Data Source=" + "C:\\Users\\Kiwian\\Downloads\\Github Repos\\kiwiapi\\protocall.db";
+        // I hate this line so much like wtf is this
+		string connectionString = "Data Source=" + Path.Combine(Directory.GetParent(Directory.GetParent(Directory.GetParent(Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)!.FullName)!.FullName)!.FullName)!.FullName, "protocall.db");
         database = new SqliteConnection(connectionString);
         database.Open();
 
@@ -40,7 +41,7 @@ public class Program {
         });
         builder.Services.AddCors(options => {
             options.AddDefaultPolicy(policy => {
-                policy.WithOrigins("https://test.kiwiandoesthings.place:8000", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiandoesthings.place", "https://www.kiwiandoesthings.place", "https://www.api.kiwiandoesthings.place", "https://www.protocall.kiwiandoesthings.place");
+                policy.WithOrigins("http://localhost:8000", "https://localhost:8000", "https://test.kiwiandoesthings.place:8000", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiandoesthings.place", "https://www.kiwiandoesthings.place", "https://www.api.kiwiandoesthings.place", "https://www.protocall.kiwiandoesthings.place");
                 policy.AllowAnyMethod();
                 policy.AllowAnyHeader();
                 policy.AllowCredentials();
@@ -568,15 +569,59 @@ public class Program {
                 return BadRequest("Username can only use \"A-z, 0-9, -, _\", and must be greater than 3 characters and shorter than 18. You may not name yourself \"System\" or \"Unknown User\".");
             }
 
-            SqliteCommand command = database!.CreateCommand();
+            using SqliteCommand command = database!.CreateCommand();
             command.CommandText = "UPDATE users SET username = $newUsername WHERE user_id = $userID";
             command.Parameters.AddWithValue("$newUsername", newUsername);
             command.Parameters.AddWithValue("$userID", auth.userID);
             await command.ExecuteNonQueryAsync();
-            command.Dispose();
 
             return Results.Ok();
         });
+
+        app.MapPost("/push_editMessage", async (HttpContext context, int roomID, int messageID, string newMessageContent, bool isDeletion) => {
+            AuthenticationResult auth = await IsAuthentic(context);
+            if (!auth) {
+                return auth.error;
+            }
+
+            bool isOwnMessage = false;
+            bool hasModDeletionPermissions = false;
+
+            if (await UserAccessLevelInRoom(auth.userID, roomID) >= 1) {
+                hasModDeletionPermissions = true;
+            }
+
+            SqliteCommand queryCommand = database!.CreateCommand();
+            queryCommand.CommandText = "SELECT author_id FROM MESSAGES where id = $messageID";
+            queryCommand.Parameters.AddWithValue("$messageID", messageID);
+            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            if (await reader.ReadAsync()) {
+                isOwnMessage = reader.GetString(0) == auth.userID;
+            }
+
+            if (isDeletion) {
+                if (!isOwnMessage && !hasModDeletionPermissions) {
+                    return Unauthorized("You do not have permissions to delete other users' messages!");
+                }
+
+                SqliteCommand deleteCommand = database!.CreateCommand();
+                deleteCommand.CommandText = "DELETE FROM messages WHERE id = $messageID";
+                deleteCommand.Parameters.AddWithValue("$messageID", messageID);
+                await deleteCommand.ExecuteNonQueryAsync();
+            } else {
+                if (!isOwnMessage) {
+                    return Unauthorized("You cannot edit other users' messages!");
+                }
+
+				SqliteCommand editCommand = database!.CreateCommand();
+				editCommand.CommandText = "UPDATE messages SET content = $newMessageContent WHERE id = $messageID";
+                editCommand.Parameters.AddWithValue("$newMessageContent", newMessageContent);
+				editCommand.Parameters.AddWithValue("$messageID", messageID);
+				await editCommand.ExecuteNonQueryAsync();
+			}
+
+            return Results.Ok();
+		});
 
         app.MapHub<ProtoCall>("/protocall");
 
