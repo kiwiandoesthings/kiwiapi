@@ -1,7 +1,10 @@
 namespace kiwiapi;
 
-using System.Net;
 using Microsoft.Data.Sqlite;
+using System.Net;
+using System.Text;
+
+using static BCrypt.Net.BCrypt;
 
 public class Program {
     public static SqliteConnection? database;
@@ -92,10 +95,87 @@ public class Program {
         ProtoCallApi protocall = new ProtoCallApi();
         protocall.MapApiFunctions(app);
 
+		KiwiBlogApi kiwiBlog = new KiwiBlogApi(database);
+        kiwiBlog.MapApiFunctions(app);
+
         app.MapHub<ProtoCallApi>("/protocall");
 
         app.MapControllers();
 
         app.Run();
     }
+
+	public static IResult Unauthorized(string error) {
+		return Results.Content(
+			error,
+			"text/plain",
+			Encoding.UTF8,
+			statusCode: 401
+		);
+	}
+
+	public static IResult NotFound(string error) {
+		return Results.Content(
+			error,
+			"text/plain",
+			Encoding.UTF8,
+			statusCode: 404
+		);
+	}
+
+	public static IResult BadRequest(string error) {
+		return Results.Content(
+			error,
+			"text/plain",
+			Encoding.UTF8,
+			statusCode: 400
+		);
+	}
+
+	public static IResult ServerError(string error) {
+		return Results.Content(
+			error,
+			"text/plain",
+			Encoding.UTF8,
+			statusCode: 500
+		);
+	}
+
+    public static string GetHashedString(string toHash) {
+        return HashPassword(toHash);
+	}
+
+    public static bool VerifyHashedString(string input, string hashedInput) {
+        return Verify(input, hashedInput);
+    }
+
+    public static int ComputeDistance(string? source, string? target) {
+        if (source == null || target == null) {
+            return 100;
+        }
+        if (source.Length == 0) {
+            return target.Length;
+        }
+        if (target.Length == 0) {
+            return source.Length;
+        }
+
+		int[,] distance = new int[source.Length + 1, target.Length + 1];
+		for (int i = 0; i <= source.Length; i++) {
+            distance[i, 0] = i;
+		}
+		for (int j = 0; j <= target.Length; j++) {
+            distance[0, j] = j;
+		}
+
+		for (int i = 1; i <= source.Length; i++) {
+			for (int j = 1; j <= target.Length; j++) {
+				int cost = (target[j - 1] == source[i - 1]) ? 0 : 1;
+				distance[i, j] = Math.Min(
+					Math.Min(distance[i - 1, j] + 1, distance[i, j - 1] + 1),
+					distance[i - 1, j - 1] + cost);
+			}
+		}
+		return distance[source.Length, target.Length];
+	}
 }

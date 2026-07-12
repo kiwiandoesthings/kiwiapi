@@ -1,16 +1,14 @@
 ﻿namespace kiwiapi;
 
-using System.Collections.Concurrent;
-using System.Net;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
-using SixLabors.ImageSharp;
+using SkiaSharp;
+using System.Collections.Concurrent;
+using System.Net;
+using System.Text.RegularExpressions;
 
-using static kiwiapi.Program;
+using static Program;
 
 public class ProtoCallApi : Hub {
     public record MessagesData(string authorID, string content, int messageIndex, string messageTimestamp);
@@ -191,14 +189,14 @@ public class ProtoCallApi : Hub {
 
 			try {
 				using (Stream incomingStream = profilePicture!.OpenReadStream()) {
-					ImageInfo imageInfo = await Image.IdentifyAsync(incomingStream);
+					using (SKBitmap bitmap = SKBitmap.Decode(incomingStream)) {
+						if (bitmap == null) {
+							return BadRequest("Invalid or corrupted image file.");
+						}
 
-					if (imageInfo == null) {
-						return BadRequest("Invalid or corrupted image file.");
-					}
-
-					if (imageInfo.Width != 512 || imageInfo.Height != 512) {
-						return BadRequest("Resolution does not match required resolution of 512x512.");
+						if (bitmap.Width != 512 || bitmap.Height != 512) {
+							return BadRequest("Resolution does not match required resolution of 512x512.");
+						}
 					}
 				}
 
@@ -237,9 +235,7 @@ public class ProtoCallApi : Hub {
 			registerCommand.Parameters.AddWithValue("$username", username);
 			registerCommand.Parameters.AddWithValue("$userColor", color);
 			registerCommand.Parameters.AddWithValue("$userPassword", password);
-			byte[] inputBytes = Encoding.UTF8.GetBytes(password + username + color);
-			byte[] hashBytes = SHA256.HashData(inputBytes);
-			string userSecret = Convert.ToBase64String(hashBytes);
+			string userSecret = GetHashedString(password + username + color);
 			registerCommand.Parameters.AddWithValue("$userSecret", userSecret);
 			registerCommand.Parameters.AddWithValue("$profilePictureLink", profilePictureUrl);
 			registerCommand.Parameters.AddWithValue("$info", GetDeviceInfo(context));
@@ -755,42 +751,6 @@ public class ProtoCallApi : Hub {
 	public static IResult CouldNotGetAuth() {
 		Console.WriteLine("PTC | User tried to make request, but server could not extract userID and secret from cookies");
 		return BadRequest("Could not get user authentication information from request. Please log in again.");
-	}
-
-	public static IResult Unauthorized(string error) {
-		return Results.Content(
-			error,
-			"text/plain",
-			System.Text.Encoding.UTF8,
-			statusCode: 401
-		);
-	}
-
-	public static IResult NotFound(string error) {
-		return Results.Content(
-			error,
-			"text/plain",
-			System.Text.Encoding.UTF8,
-			statusCode: 404
-		);
-	}
-
-	public static IResult BadRequest(string error) {
-		return Results.Content(
-			error,
-			"text/plain",
-			System.Text.Encoding.UTF8,
-			statusCode: 400
-		);
-	}
-
-	public static IResult ServerError(string error) {
-		return Results.Content(
-			error,
-			"text/plain",
-			System.Text.Encoding.UTF8,
-			statusCode: 500
-		);
 	}
 
 	public static async Task<AuthenticationResult> IsAuthentic(HttpContext context) {
