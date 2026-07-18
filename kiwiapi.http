@@ -3,32 +3,20 @@
 GET {{kiwiapi_HostAddress}}/hello
 Accept: application/json
 
-##
-
 GET {{kiwiapi_HostAddress}}/randint
 Accept: application/json
-
-##
 
 GET {{kiwiapi_HostAddress}}/randsong
 Accept: text/html
 
-##
-
 GET {{kiwiapi_HostAddress}}/getsong
 Accept: audio/mpeg
-
-##
 
 GET {{kiwiapi_HostAddress}}/getao3storyid
 Accept: application/json
 
-##
-
 GET {{kiwiapi_HostAddress}}/getao3text
 Accept: application/json
-
-##
 
 GET {{kiwiapi_HostAddress}}/randstuck
 Accept: image/gif
