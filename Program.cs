@@ -178,4 +178,8 @@ public class Program {
 		}
 		return distance[source.Length, target.Length];
 	}
+
+    public static string MakeUUID() {
+        return Guid.NewGuid().ToString();
+    }
 }

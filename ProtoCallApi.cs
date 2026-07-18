@@ -295,7 +295,7 @@ public class ProtoCallApi : Hub {
 			using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
 			if (await reader.ReadAsync()) {
 				string? profilePictureUrl = await reader.IsDBNullAsync(0) ? "none" : reader.GetString(0);
-				string aboutMe = await reader.IsDBNullAsync(1) ? "" : reader.GetString(1);
+				string aboutMe = await reader.IsDBNullAsync(1) ? string.Empty : reader.GetString(1);
 
 				return Results.Ok(new {
 					profilePictureUrl = profilePictureUrl,
