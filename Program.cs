@@ -47,6 +47,7 @@ public class Program {
                 policy.AllowCredentials();
             });
         });
+        builder.Services.AddHostedService<Bot>();
 
         WebApplication app = builder.Build();
 		//app.UseExceptionHandler("/error");
