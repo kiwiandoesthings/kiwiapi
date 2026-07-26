@@ -29,8 +29,15 @@ public class Program {
             options.EnableDetailedErrors = true;
         });
         builder.Services.AddCors(options => {
+            options.AddPolicy("BlogPolicy", policy => {
+                policy.SetIsOriginAllowed(allowed => true);
+                policy.AllowAnyMethod();
+                policy.AllowAnyHeader();
+                policy.AllowCredentials();
+            });
+
             options.AddDefaultPolicy(policy => {
-                policy.WithOrigins("http://localhost:8000", "https://localhost:8000", "https://test.kiwiandoesthings.place:8000", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiandoesthings.place", "https://www.kiwiandoesthings.place", "https://www.api.kiwiandoesthings.place", "https://www.protocall.kiwiandoesthings.place");
+                policy.WithOrigins("http://localhost:8000", "https://localhost:8000", "https://test.kiwiandoesthings.place", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiandoesthings.place", "https://www.kiwiandoesthings.place", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiblog.kiwiandoesthings.place");
                 policy.AllowAnyMethod();
                 policy.AllowAnyHeader();
                 policy.AllowCredentials();
@@ -41,8 +48,8 @@ public class Program {
         WebApplication app = builder.Build();
 		//app.UseExceptionHandler("/error");
 		app.UseHsts();
-        app.UseCors();
 		app.UseRouting();
+        app.UseCors();
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseAntiforgery();
@@ -96,7 +103,7 @@ public class Program {
         ProtoCallApi protocall = new ProtoCallApi();
         protocall.MapApiFunctions(app);
 
-		KiwiBlogApi kiwiBlog = new KiwiBlogApi(database);
+		KiwiBlogApi kiwiBlog = new KiwiBlogApi();
         kiwiBlog.MapApiFunctions(app);
 
         app.MapHub<ProtoCallApi>("/protocall");
