@@ -19,12 +19,12 @@ public class KiwiBlogApi {
 	private record Get(string blogID, int startPostID, int amount);
 	private record Search(string blogID, DateRangeSearch? dateRangeSearch, KeywordSearch? keywordSearch);
 	private record GetInformation(string blogID);
-	private record GetScript(string blogID);
+	private record GetScript(string blogID, string stylesheetName, string? containerID);
 
 	private record DateRangeSearch(string startDate, string endDate);
 	private record KeywordSearch(string searchKey, bool fuzzySearch);
 
-    private const string baseEmbed = "<div id=\"blog-viewer\"><div id=\"posts-container\"></div><div id=\"load-posts-button-container\"><button id=\"load-posts-button\" onclick=\"loadPosts()\">Load Posts</button></div><script src=\"https://kiwiblog.kiwiandoesthings.place/scripts/common.js\"></script><script>const blogID = \"BLOG_ID\";var postsContainerElement=document.getElementById(\"posts-container\");var loadButtonElement=document.getElementById(\"load-posts-button\");var embedScriptElement=document.getElementById(\"blog-embed-script\");var loading=false;var lastLoadedPostID=0;var totalBlogPosts=0;getBlogInfo();async function getBlogInfo(){var infoResponse=await api(\"info\",{blogID},\"GET\");if(!infoResponse.error){totalBlogPosts=infoResponse.data.totalPosts;updateButton();}else{displayStatus(true,\"view-status\",\"Could not get your blog info.\");}var scriptResponse=await api(\"script\",{blogID},\"GET\");if(!scriptResponse.error){embedScriptElement.textContent=scriptResponse.data.blogScript;}else{embedScriptElement.textContent=\"Could not fetch blog embed script. Please reload the page.\";}}async function loadPosts(){if(loading){return;}loading=true;var response=await api(\"get\",{blogID,startPostID:lastLoadedPostID,amount:10},\"GET\");if(response.error){console.log(\"err \"+response.data);loading=false;return;}for(var post of response.data){var postElement=document.createElement(\"div\");postElement.classList.add(\"blog-post\");var headerElement=document.createElement(\"div\");headerElement.classList.add(\"blog-header\");var titleElement=document.createElement(\"p\");titleElement.textContent=post.postTitle;var dateElement=document.createElement(\"p\");dateElement.textContent=post.postCreationDate;headerElement.appendChild(titleElement);headerElement.appendChild(dateElement);var contentElement=document.createElement(\"div\");contentElement.innerHTML=post.postFormattedContent;contentElement.classList.add(\"blog-body\");postElement.appendChild(headerElement);postElement.appendChild(contentElement);postsContainerElement.appendChild(postElement);lastLoadedPostID++;}loading=false;updateButton();}function updateButton(){if(lastLoadedPostID==totalBlogPosts+1){loadButtonElement.style.display=\"none\";}loadButtonElement.textContent=\"Load \"+Math.min(lastLoadedPostID+1,totalBlogPosts)+\"-\"+Math.min(lastLoadedPostID+10,totalBlogPosts)+\"/\"+totalBlogPosts+\" posts\";}</script></div>";
+    private const string baseEmbed = "<script src=\"https://test.kiwiandoesthings.place/scripts/common.js\"></script><script src=\"https://test.kiwiandoesthings.place/scripts/blog_functions.js\"></script><script src=\"https://test.kiwiandoesthings.place/scripts/home_blog.js\"></script><script src=\"https://test.kiwiandoesthings.place/scripts/embed_loader.js\"></script><script>initialize({stylesheet:\"@STYLESHEET@\",blogID:\"@BLOG_ID@\",containerID:\"@CONTAINER_ID@\"});</script>";
 
 	public KiwiBlogApi() {
         string connectionString = "Data Source=" + Path.Combine(Directory.GetParent(Directory.GetParent(Directory.GetParent(Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)!.FullName)!.FullName)!.FullName)!.FullName, "kiwiblog.db");
@@ -78,10 +78,12 @@ public class KiwiBlogApi {
                 string storedHash = (string)result[0][1];
 
                 if (!VerifyHashedString(login.password, storedHash)) {
+					Console.WriteLine("Attempted login: invalid");
                     return Unauthorized("Incorrect credentials");
                 }
             } else {
-				return Unauthorized("Incorrect credentials");
+                Console.WriteLine("Attempted login: invalid");
+                return Unauthorized("Incorrect credentials");
 			}
 
             string loginToken = MakeUUID();
@@ -91,6 +93,8 @@ public class KiwiBlogApi {
 			await addSessionCommand.Execute();
 
 			SetHttpCookie(context, "login_token", loginToken);
+
+			Console.WriteLine("Attempted login: valid. Returning blog ID \"" + blogID + "\"");
 
 			return Results.Ok(new {
 				blogID = blogID
@@ -175,7 +179,7 @@ public class KiwiBlogApi {
             List<object[]> info = await queryPostCommand.ExecuteGet();
 
             if (info.Count == 0) {
-                return Results.Ok();
+                return Results.Ok(new List<object>());
             }
 
             MarkdownPipeline pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
@@ -193,7 +197,7 @@ public class KiwiBlogApi {
                 };
             }).ToList();
 
-            return Results.Ok(posts);
+			return Results.Ok(posts);
         });
 
         blog.MapPost("/search", async (Search search, HttpContext context) => {
@@ -232,8 +236,14 @@ public class KiwiBlogApi {
 		});
 
 		blog.MapGet("/script", async ([AsParameters] GetScript request, HttpContext context) => {
-			return Results.Ok(new {
-				blogScript = baseEmbed.Replace("BLOG_ID", request.blogID)
+			string baseScript = baseEmbed.Replace("@STYLESHEET@", request.stylesheetName).Replace("@BLOG_ID@", request.blogID);
+			bool needsContainer = string.IsNullOrEmpty(request.containerID);
+            if (needsContainer) {
+				baseScript += "<div id=\"blog-container\"></div>";
+			}
+
+            return Results.Ok(new {
+				blogScript = baseScript.Replace("@CONTAINER_ID@", needsContainer ? "blog-container" : request.containerID)
 			});
         });
 	}
