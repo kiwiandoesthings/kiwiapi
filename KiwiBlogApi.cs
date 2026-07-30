@@ -22,12 +22,29 @@ public class KiwiBlogApi {
     private const string baseEmbed = "<script src=\"https://kiwiblog.kiwiandoesthings.place/scripts/common.js\"></script>\n<script src=\"https://kiwiblog.kiwiandoesthings.place/scripts/home_blog.js\"></script>\n<script src=\"https://kiwiblog.kiwiandoesthings.place/scripts/embed_loader.js\"></script>\n<script>\n\tinitialize({\n\t\tstylesheet:\"@STYLESHEET@\",\n\t\tblogID:\"@BLOG_ID@\",\n\t\tcontainerID:\"@CONTAINER_ID@\"\n\t});\n</script>";
 
 	public KiwiBlogApi() {
-        string connectionString = "Data Source=" + Path.Combine(Directory.GetParent(Directory.GetParent(Directory.GetParent(Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)!.FullName)!.FullName)!.FullName)!.FullName, "kiwiblog.db");
+        string basePath = Directory.GetParent(Directory.GetParent(Directory.GetParent(Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)!.FullName)!.FullName)!.FullName)!.FullName;
+        string dbPath = Path.Combine(basePath, "kiwiblog.db");
+        string schemaPath = Path.Combine(basePath, "schema.sql");
+
+        bool dbExists = File.Exists(dbPath);
+
+        string connectionString = "Data Source=" + dbPath;
         database = new SqliteConnection(connectionString);
         database.Open();
 
+        using var walCommand = database.CreateCommand();
+        walCommand.CommandText = "PRAGMA journal_mode=WAL;";
+        walCommand.ExecuteNonQuery();
+
+        if (!dbExists && File.Exists(schemaPath)) {
+            string schemaSql = File.ReadAllText(schemaPath);
+            using var schemaCommand = database.CreateCommand();
+            schemaCommand.CommandText = schemaSql;
+            schemaCommand.ExecuteNonQuery();
+        }
+
         SqlCommand.Setup(database);
-	}
+    }
 	
 	public void MapApiFunctions(WebApplication app) {
 		RouteGroupBuilder blog = app.MapGroup("/blog").RequireCors("BlogPolicy");
@@ -104,6 +121,8 @@ public class KiwiBlogApi {
 		blog.MapDelete("/sessions", async (HttpContext context) => {
 			string loginToken = GetHttpCookie(context, "login_token");
 
+			SetHttpCookie(context, "login_token", "");
+
 			string? blogID = await GetBlogIDFromToken(loginToken);
 			if (blogID == null) {
 				Console.WriteLine("Failed to logout. Invalid token");
@@ -113,8 +132,6 @@ public class KiwiBlogApi {
 			using SqlCommand removeSessionCommand = new SqlCommand("DELETE FROM sessions WHERE login_token = @login_token",
 			("@login_token", loginToken));
 			await removeSessionCommand.Execute();
-
-			SetHttpCookie(context, "login_token", "");
 
 			Console.WriteLine("Successfully logged out user with blog ID: \"" + blogID + "\"");
 
