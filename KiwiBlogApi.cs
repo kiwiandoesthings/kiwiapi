@@ -38,6 +38,8 @@ public class KiwiBlogApi {
 
         if (!dbExists && File.Exists(schemaPath)) {
             string schemaSql = File.ReadAllText(schemaPath);
+			schemaSql = schemaSql.Replace("CREATE TABLE sqlite_sequence(name,seq);", "");
+
             using var schemaCommand = database.CreateCommand();
             schemaCommand.CommandText = schemaSql;
             schemaCommand.ExecuteNonQuery();
