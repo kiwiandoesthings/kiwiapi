@@ -7,6 +7,7 @@ using static Program;
 
 public class KiwiBlogApi {
 	private SqliteConnection database;
+	private Logger logger;
 
 	private record Register(string name, string email, string password, bool isEmailPublic);
 	private record Login(string email, string password);
@@ -24,6 +25,8 @@ public class KiwiBlogApi {
     private const string baseEmbed = "<script src=\"https://kiwiblog.kiwiandoesthings.place/scripts/common.js\"></script>\n<script src=\"https://kiwiblog.kiwiandoesthings.place/scripts/home_blog.js\"></script>\n<script src=\"https://kiwiblog.kiwiandoesthings.place/scripts/embed_loader.js\"></script>\n<script>\n\tinitialize({\n\t\tstylesheet:\"@STYLESHEET@\",\n\t\tblogID:\"@BLOG_ID@\",\n\t\tcontainerID:\"@CONTAINER_ID@\"\n\t});\n</script>";
 
 	public KiwiBlogApi() {
+		logger = new Logger("KWB");
+
         string basePath = Directory.GetParent(Directory.GetParent(Directory.GetParent(Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)!.FullName)!.FullName)!.FullName)!.FullName;
         string dbPath = Path.Combine(basePath, "kiwiblog.db");
         string schemaPath = Path.Combine(basePath, "schema.sql");
@@ -39,7 +42,7 @@ public class KiwiBlogApi {
         walCommand.ExecuteNonQuery();
 
         if (!dbExists && File.Exists(schemaPath)) {
-			Console.WriteLine("Creating new database from schema.sql file");
+			logger.INFO("Creating new database from schema.sql file");
 
             string schemaSql = File.ReadAllText(schemaPath);
 			schemaSql = schemaSql.Replace("CREATE TABLE sqlite_sequence(name,seq);", "");
@@ -57,7 +60,7 @@ public class KiwiBlogApi {
 
 		blog.MapPost("/blogs", async (Register registration, HttpContext context) => {
 			if (string.IsNullOrEmpty(registration.name) || string.IsNullOrEmpty(registration.email) || string.IsNullOrWhiteSpace(registration.password)) {
-				Console.WriteLine("Failed to register blog. Required fields were not provided or valid.");
+				logger.ERR("Failed to register blog. Required fields were not provided or valid.");
 				return BadRequest("You must provide a blog name, email, and password");
 			}
 
@@ -70,7 +73,7 @@ public class KiwiBlogApi {
 				("@email_public", registration.isEmailPublic));
 			await registerBlogCommand.Execute();
 
-			Console.WriteLine("Successfully registered new blog with name: \"" + registration.name + "\", email: \"" + registration.email + "\" that is" + (registration.isEmailPublic ? "" : "n't") + " public");
+			logger.INFO("Successfully registered new blog with name: \"" + registration.name + "\", email: \"" + registration.email + "\" that is" + (registration.isEmailPublic ? "" : "n't") + " public");
 			return Results.Ok(new {
 				blogID = blogID
 			});
@@ -81,7 +84,7 @@ public class KiwiBlogApi {
 
 			string? blogID = await GetBlogIDFromToken(loginToken);
 			if (blogID == null) {
-				Console.WriteLine("Failed to deregister account. Invalid token");
+				logger.ERR("Failed to deregister account. Invalid token");
 				return Unauthorized("Invalid login token.");
 			}
 
@@ -89,7 +92,7 @@ public class KiwiBlogApi {
 				("@blog_id", blogID));
 			await deregisterCommand.Execute();
 
-			Console.WriteLine("Successfully deregistered user with blog ID: \"" + blogID + "\"");
+			logger.INFO("Successfully deregistered user with blog ID: \"" + blogID + "\"");
 			return Results.Ok();
 		});
 
@@ -104,11 +107,11 @@ public class KiwiBlogApi {
                 string storedHash = (string)result[0][1];
 
                 if (!VerifyHashedString(login.password, storedHash)) {
-					Console.WriteLine("Failed to login. Invalid password for email \"" + login.email + "\"");
+					logger.ERR("Failed to login. Invalid password for email \"" + login.email + "\"");
                     return Unauthorized("Incorrect credentials");
                 }
             } else {
-                Console.WriteLine("Failed to login. No email matching \"" + login.email + "\"");
+                logger.ERR("Failed to login. No email matching \"" + login.email + "\"");
                 return Unauthorized("Incorrect credentials");
 			}
 
@@ -120,7 +123,7 @@ public class KiwiBlogApi {
 
 			SetHttpCookie(context, "login_token", loginToken);
 
-			Console.WriteLine("Successfully logged in user with blog ID: \"" + blogID + "\"");
+			logger.INFO("Successfully logged in user with blog ID: \"" + blogID + "\"");
 			return Results.Ok(new {
 				blogID = blogID
 			});
@@ -133,7 +136,7 @@ public class KiwiBlogApi {
 
 			string? blogID = await GetBlogIDFromToken(loginToken);
 			if (blogID == null) {
-				Console.WriteLine("Failed to logout. Invalid token");
+				logger.ERR("Failed to logout. Invalid token");
 				return Unauthorized("Invalid login token.");
 			}
 
@@ -141,7 +144,7 @@ public class KiwiBlogApi {
 				("@login_token", loginToken));
 			await removeSessionCommand.Execute();
 
-			Console.WriteLine("Successfully logged out user with blog ID: \"" + blogID + "\"");
+			logger.INFO("Successfully logged out user with blog ID: \"" + blogID + "\"");
 			return Results.Ok();
 		});
 
@@ -150,7 +153,7 @@ public class KiwiBlogApi {
 
 			string? blogID = await GetBlogIDFromToken(loginToken);
 			if (blogID == null) {
-                Console.WriteLine("Failed to add post to blog with ID: \"" + blogID + "\". Invalid token");
+                logger.ERR("Failed to add post to blog with ID: \"" + blogID + "\". Invalid token");
                 return Unauthorized("Invalid login token.");
 			}
 
@@ -162,7 +165,7 @@ public class KiwiBlogApi {
 				("@date_edited", string.Empty));
 			await addPostCommand.Execute();
 
-			Console.WriteLine("Successfully added new post to blog with ID: \"" + blogID + "\"");
+			logger.INFO("Successfully added new post to blog with ID: \"" + blogID + "\"");
 			return Results.Ok();
 		});
 
@@ -171,7 +174,7 @@ public class KiwiBlogApi {
 
 			string? blogID = await GetBlogIDFromToken(loginToken);
             if (blogID == null) {
-                Console.WriteLine("Failed to edit post with ID: {" + postID + "} from blog with ID: \"" + blogID + "\". Invalid token");
+                logger.ERR("Failed to edit post with ID: {" + postID + "} from blog with ID: \"" + blogID + "\". Invalid token");
                 return Unauthorized("Invalid login token.");
             }
 
@@ -183,7 +186,7 @@ public class KiwiBlogApi {
 			int rowsAffected = await editCommand.Execute();
 
 			if (rowsAffected > 0) {
-				Console.WriteLine("Successfully edited post with ID: {" + postID + "} from blog with ID: \"" + blogID + "\"");
+				logger.INFO("Successfully edited post with ID: {" + postID + "} from blog with ID: \"" + blogID + "\"");
 				BlogPost post = (await GetBlogPost(blogID, postID))!;
                 return Results.Ok(new {
                     postID = postID,
@@ -196,7 +199,7 @@ public class KiwiBlogApi {
                 });
 			}
 
-            Console.WriteLine("Failed to edit post with post ID: {" + postID + "} from blog with ID: \"" + blogID + "\"");
+            logger.ERR("Failed to edit post with post ID: {" + postID + "} from blog with ID: \"" + blogID + "\"");
             return ServerError("Failed to edit post.");
         });
 
@@ -205,7 +208,7 @@ public class KiwiBlogApi {
 
             string? blogID = await GetBlogIDFromToken(loginToken);
             if (blogID == null) {
-                Console.WriteLine("Failed to delete post with ID: {" + postID + "} from blog with ID: \"" + blogID + "\". Invalid token");
+                logger.ERR("Failed to delete post with ID: {" + postID + "} from blog with ID: \"" + blogID + "\". Invalid token");
                 return Unauthorized("Invalid login token.");
             }
 
@@ -215,11 +218,11 @@ public class KiwiBlogApi {
             int rowsAffected = await deleteCommand.Execute();
 
             if (rowsAffected > 0) {
-				Console.WriteLine("Successfully deleted post with ID: {" + postID + "} from blog with ID: \"" + blogID + "\"");
+				logger.INFO("Successfully deleted post with ID: {" + postID + "} from blog with ID: \"" + blogID + "\"");
 				return Results.Ok();
             }
 
-			Console.WriteLine("Failed to delete post with ID: {" + postID + "} from blog with ID: \"" + blogID + "\" for unknown reason");
+			logger.ERR("Failed to delete post with ID: {" + postID + "} from blog with ID: \"" + blogID + "\" for unknown reason");
             return ServerError("Failed to delete post.");
         });
 
@@ -234,7 +237,7 @@ public class KiwiBlogApi {
             List<object[]> info = await queryPostCommand.ExecuteGet();
 
             if (info.Count == 0) {
-				Console.WriteLine("Failed to find any posts when requesting {" + request.amount + "} posts from blog with ID: \"" + request.blogID + "\" starting at post ID: {" + request.lastPostID + "}");
+				logger.WARN("Failed to find any posts when requesting {" + request.amount + "} posts from blog with ID: \"" + request.blogID + "\" starting at post ID: {" + request.lastPostID + "}");
                 return Results.Ok(new List<object>());
             }
 
@@ -265,7 +268,7 @@ public class KiwiBlogApi {
 
 			List<object[]> results = await searchCommand.ExecuteGet();
 			if (results.Count == 0) {
-				//Console.WriteLine("Found 0 posts from blog with ID: \"" + search.blogID + "\" ")
+				//logger.WARN("Found 0 posts from blog with ID: \"" + search.blogID + "\" ")
 				return NotFound("No posts found that matched those filters");
 			}
 
@@ -278,7 +281,7 @@ public class KiwiBlogApi {
 			List<object[]> info = await queryBlogCommand.ExecuteGet();
 
 			if (info.Count == 0) {
-				Console.WriteLine("Failed to get info from blog with ID: \"" + blogID + "\"");
+				logger.ERR("Failed to get info from blog with ID: \"" + blogID + "\"");
 				return NotFound("Could not find a blog with that blog ID");
 			}
 			string blogName = (string)info[0][0];
