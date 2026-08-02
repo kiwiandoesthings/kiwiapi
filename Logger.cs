@@ -125,9 +125,7 @@ public class Logger {
     }
 
     private static string ColoredString(string color, string originalString) {
-        if (logColors.TryGetValue(color, out string colorString)) {
-            colorString = logColors[color];
-        }
+        string colorString = logColors.TryGetValue(color, out string? value) ? value : string.Empty;
         return colorString + originalString + logColors["RESET"];
     }
 

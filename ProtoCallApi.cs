@@ -626,11 +626,11 @@ public class ProtoCallApi : Hub {
 		return Regex.IsMatch(toCheck, @"^[a-zA-Z0-9\-_]+$");
 	}
 
-	public static bool ValidAdvancedString(string toCheck) {
-		return Regex.IsMatch(toCheck, @"^[\x21-\x7E]$");
-	}
+    public static bool ValidAdvancedString(string toCheck) {
+        return Regex.IsMatch(toCheck, @"^[\x21-\x7E]+$");
+    }
 
-	public static bool ValidHex(string toCheck) {
+    public static bool ValidHex(string toCheck) {
 		return Regex.IsMatch(toCheck, @"^#?([A-Fa-f0-9]{6})$");
 	}
 
