@@ -7,10 +7,10 @@ using System.Text.RegularExpressions;
 using static Program;
 
 public class KiwiBlogApi {
-	private SqliteConnection database;
-	private Logger logger;
+	private readonly Logger logger;
+	private readonly SqlInterface sql;
 
-	private record Register(string name, string email, string password, bool isEmailPublic);
+    private record Register(string name, string email, string password, bool isEmailPublic);
 	private record BlogSettings(string email, bool isEmailPublic);
 	private record Login(string email, string password);
 	private record Add(string title, string content, string? summary);
@@ -36,25 +36,24 @@ public class KiwiBlogApi {
         bool dbExists = File.Exists(dbPath);
 
         string connectionString = "Data Source=" + dbPath;
-        database = new SqliteConnection(connectionString);
-        database.Open();
 
-        using var walCommand = database.CreateCommand();
+		sql = new SqlInterface(connectionString);
+
+		using SqliteConnection connection = new SqliteConnection(connectionString);
+        connection.Open();
+
+        using var walCommand = connection.CreateCommand();
         walCommand.CommandText = "PRAGMA journal_mode=WAL;";
         walCommand.ExecuteNonQuery();
 
         if (!dbExists && File.Exists(schemaPath)) {
-			logger.INFO("Creating new database from schema.sql file");
-
             string schemaSql = File.ReadAllText(schemaPath);
-			schemaSql = schemaSql.Replace("CREATE TABLE sqlite_sequence(name,seq);", "");
+            schemaSql = schemaSql.Replace("CREATE TABLE sqlite_sequence(name,seq);", "");
 
-            using var schemaCommand = database.CreateCommand();
+            using var schemaCommand = connection.CreateCommand();
             schemaCommand.CommandText = schemaSql;
             schemaCommand.ExecuteNonQuery();
         }
-
-        SqlCommand.Setup(database);
     }
 	
 	public void MapApiFunctions(WebApplication app) {
@@ -90,12 +89,12 @@ public class KiwiBlogApi {
 			}
 
 			string blogID = MakeUUID();
-			using SqlCommand registerBlogCommand = new SqlCommand("INSERT INTO blogs (blog_id, name, email, password_hash, email_public) VALUES (@blog_id, @name, @email, @password_hash, @email_public)",
-				("@blog_id", blogID),
-				("@name", registration.name),
-				("@email", registration.email),
-				("@password_hash", GetHashedString(registration.password)),
-				("@email_public", registration.isEmailPublic));
+			using SqlCommand registerBlogCommand = sql.Command("INSERT INTO blogs (blog_id, name, email, password_hash, email_public) VALUES (@blog_id, @name, @email, @password_hash, @email_public)",
+				("blog_id", blogID),
+				("name", registration.name),
+				("email", registration.email),
+				("password_hash", GetHashedString(registration.password)),
+				("email_public", registration.isEmailPublic));
 			await registerBlogCommand.Execute();
 
             string loginToken = await AddLoginToken(blogID);
@@ -114,10 +113,10 @@ public class KiwiBlogApi {
 				return result;
 			}
 
-			using SqlCommand updateCommand = new SqlCommand("UPDATE blogs SET email = @email, email_public = @email_public WHERE blog_id = @blog_id",
-				("@email", settings.email),
-				("@email_public", settings.isEmailPublic),
-				("@blog_id", blogID!));
+			using SqlCommand updateCommand = sql.Command("UPDATE blogs SET email = @email, email_public = @email_public WHERE blog_id = @blog_id",
+				("email", settings.email),
+				("email_public", settings.isEmailPublic),
+				("blog_id", blogID!));
 			int rowsAffected = await updateCommand.Execute();
 
 			if (rowsAffected == 0) {
@@ -129,8 +128,8 @@ public class KiwiBlogApi {
         });
 
         blog.MapGet("/blogs/{blogID:guid}", async (string blogID, HttpContext context) => {
-            using SqlCommand queryBlogCommand = new SqlCommand("SELECT name, date_created FROM blogs WHERE blog_id = @blog_id",
-                ("@blog_id", blogID));
+            using SqlCommand queryBlogCommand = sql.Command("SELECT name, date_created FROM blogs WHERE blog_id = @blog_id",
+                ("blog_id", blogID));
             List<object[]> info = await queryBlogCommand.ExecuteGet();
 
             if (info.Count == 0) {
@@ -140,8 +139,8 @@ public class KiwiBlogApi {
             string blogName = (string)info[0][0];
             string blogCreationDate = (string)info[0][1];
 
-            using SqlCommand queryPostsCommand = new SqlCommand("SELECT COUNT(*) FROM posts WHERE blog_id = @blog_id",
-                ("@blog_id", blogID));
+            using SqlCommand queryPostsCommand = sql.Command("SELECT COUNT(*) FROM posts WHERE blog_id = @blog_id",
+                ("blog_id", blogID));
             int totalPosts = Convert.ToInt32(await queryPostsCommand.ExecuteGetScalar());
 
             return Results.Ok(new {
@@ -158,8 +157,8 @@ public class KiwiBlogApi {
                 return result;
             }
 
-			using SqlCommand queryCommand = new SqlCommand("SELECT email, email_public FROM blogs WHERE blog_id = @blog_id",
-				("@blog_id", blogID!));
+			using SqlCommand queryCommand = sql.Command("SELECT email, email_public FROM blogs WHERE blog_id = @blog_id",
+				("blog_id", blogID!));
 			List<object[]> info = await queryCommand.ExecuteGet();
 
 			if (info.Count == 0) {
@@ -197,8 +196,8 @@ public class KiwiBlogApi {
 				return Unauthorized("Invalid login token.");
 			}
 
-			using SqlCommand deregisterCommand = new SqlCommand("DELETE FROM blogs WHERE blog_id = @blog_id",
-				("@blog_id", blogID));
+			using SqlCommand deregisterCommand = sql.Command("DELETE FROM blogs WHERE blog_id = @blog_id",
+				("blog_id", blogID));
 			await deregisterCommand.Execute();
 
             SetHttpCookie(context, "login_token", "");
@@ -208,8 +207,8 @@ public class KiwiBlogApi {
 		});
 
 		blog.MapPost("/sessions", async (Login login, HttpContext context) => {
-            using SqlCommand getHashCommand = new SqlCommand("SELECT blog_id, password_hash FROM blogs WHERE email = @email", 
-				("@email", login.email));
+            using SqlCommand getHashCommand = sql.Command("SELECT blog_id, password_hash FROM blogs WHERE email = @email", 
+				("email", login.email));
             List<object[]> result = await getHashCommand.ExecuteGet();
 
 			string blogID;
@@ -246,8 +245,8 @@ public class KiwiBlogApi {
 				return Unauthorized("Invalid login token.");
 			}
 
-			using SqlCommand removeSessionCommand = new SqlCommand("DELETE FROM sessions WHERE login_token = @login_token",
-				("@login_token", loginToken));
+			using SqlCommand removeSessionCommand = sql.Command("DELETE FROM sessions WHERE login_token = @login_token",
+				("login_token", loginToken));
 			await removeSessionCommand.Execute();
 
 			logger.INFO("Successfully logged out user with blog ID: \"" + blogID + "\"");
@@ -263,12 +262,12 @@ public class KiwiBlogApi {
                 return Unauthorized("Invalid login token.");
 			}
 
-			using SqlCommand addPostCommand = new SqlCommand("INSERT INTO posts (blog_id, title, content, summary, date_edited) VALUES (@blog_id, @title, @content, @summary, @date_edited)",
-				("@blog_id", blogID),
-				("@title", post.title),
-				("@content", post.content),
-				("@summary", post.summary ?? string.Empty),
-				("@date_edited", string.Empty));
+			using SqlCommand addPostCommand = sql.Command("INSERT INTO posts (blog_id, title, content, summary, date_edited) VALUES (@blog_id, @title, @content, @summary, @date_edited)",
+				("blog_id", blogID),
+				("title", post.title),
+				("content", post.content),
+				("summary", post.summary ?? string.Empty),
+				("date_edited", string.Empty));
 			await addPostCommand.Execute();
 
 			logger.INFO("Successfully added new post to blog with ID: \"" + blogID + "\"");
@@ -284,11 +283,11 @@ public class KiwiBlogApi {
                 return Unauthorized("Invalid login token.");
             }
 
-			using SqlCommand editCommand = new SqlCommand("UPDATE posts SET title = @title, content = @content, summary = @summary, date_edited = CURRENT_TIMESTAMP WHERE post_id = @post_id",
-				("@title", edit.title),
-				("@content", edit.content),
-				("@summary", edit.summary ?? string.Empty),
-				("@post_id", postID));
+			using SqlCommand editCommand = sql.Command("UPDATE posts SET title = @title, content = @content, summary = @summary, date_edited = CURRENT_TIMESTAMP WHERE post_id = @post_id",
+				("title", edit.title),
+				("content", edit.content),
+				("summary", edit.summary ?? string.Empty),
+				("post_id", postID));
 			int rowsAffected = await editCommand.Execute();
 
 			if (rowsAffected > 0) {
@@ -318,9 +317,9 @@ public class KiwiBlogApi {
                 return Unauthorized("Invalid login token.");
             }
 
-            using SqlCommand deleteCommand = new SqlCommand("DELETE FROM posts WHERE blog_id = @blog_id AND post_id = @post_id",
-				("@blog_id", blogID),
-				("@post_id", postID));
+            using SqlCommand deleteCommand = sql.Command("DELETE FROM posts WHERE blog_id = @blog_id AND post_id = @post_id",
+				("blog_id", blogID),
+				("post_id", postID));
             int rowsAffected = await deleteCommand.Execute();
 
             if (rowsAffected > 0) {
@@ -335,10 +334,10 @@ public class KiwiBlogApi {
         blog.MapGet("/posts", async ([AsParameters] Get request, HttpContext context) => {
             long searchLastID = request.lastPostID == 0 ? long.MaxValue : request.lastPostID;
 
-            using SqlCommand queryPostCommand = new SqlCommand("SELECT post_id, title, content, summary, date_created, date_edited FROM posts WHERE blog_id = @blog_id AND post_id < @last_id ORDER BY post_id DESC LIMIT @amount",
-                ("@blog_id", request.blogID),
-                ("@amount", request.amount),
-                ("@last_id", searchLastID));
+            using SqlCommand queryPostCommand = sql.Command("SELECT post_id, title, content, summary, date_created, date_edited FROM posts WHERE blog_id = @blog_id AND post_id < @last_id ORDER BY post_id DESC LIMIT @amount",
+                ("blog_id", request.blogID),
+                ("amount", request.amount),
+                ("last_id", searchLastID));
 
             List<object[]> info = await queryPostCommand.ExecuteGet();
 
@@ -369,8 +368,8 @@ public class KiwiBlogApi {
 
         blog.MapPost("/posts/search", async (Search search, HttpContext context) => {
 			string keyword = search.keywordSearch?.searchKey ?? string.Empty;
-			using SqlCommand searchCommand = new SqlCommand("SELECT post.title, post.content, post.summary, post.date_created FROM posts post JOIN posts_fts fts ON post.post_id = fts.rowid WHERE posts_fts MATCH @keyword ORDER BY rank", 
-				("@keyword", keyword + "*"));
+			using SqlCommand searchCommand = sql.Command("SELECT post.title, post.content, post.summary, post.date_created FROM posts post JOIN posts_fts fts ON post.post_id = fts.rowid WHERE posts_fts MATCH @keyword ORDER BY rank", 
+				("keyword", keyword + "*"));
 
 			List<object[]> results = await searchCommand.ExecuteGet();
 			if (results.Count == 0) {
@@ -384,18 +383,18 @@ public class KiwiBlogApi {
 
 	private async Task<string> AddLoginToken(string blogID) {
         string loginToken = MakeUUID();
-        using SqlCommand addSessionCommand = new SqlCommand("INSERT INTO sessions (blog_id, login_token) VALUES (@blog_id, @login_token)",
-            ("@blog_id", blogID),
-            ("@login_token", loginToken));
+        using SqlCommand addSessionCommand = sql.Command("INSERT INTO sessions (blog_id, login_token) VALUES (@blog_id, @login_token)",
+            ("blog_id", blogID),
+            ("login_token", loginToken));
         await addSessionCommand.Execute();
 
 		return loginToken;
     }
 
 	private async Task<BlogPost?> GetBlogPost(string blogID, int postID) {
-		using SqlCommand queryCommand = new SqlCommand("SELECT title, content, summary, date_created, date_edited FROM posts WHERE blog_id = @blog_id AND post_id = @post_id",
-			("@blog_id", blogID),
-			("@post_id", postID));
+		using SqlCommand queryCommand = sql.Command("SELECT title, content, summary, date_created, date_edited FROM posts WHERE blog_id = @blog_id AND post_id = @post_id",
+			("blog_id", blogID),
+			("post_id", postID));
 		List<object[]> fields = await queryCommand.ExecuteGet();
 		if (fields.Count != 1) {
 			return null;
@@ -423,8 +422,8 @@ public class KiwiBlogApi {
     }
 
     private async Task<string?> GetBlogIDFromToken(string loginToken) {
-		using SqlCommand queryCommand = new SqlCommand("SELECT blog_id FROM sessions WHERE login_token = @login_token",
-			("@login_token", loginToken));
+		using SqlCommand queryCommand = sql.Command("SELECT blog_id FROM sessions WHERE login_token = @login_token",
+			("login_token", loginToken));
 		return (string?)await queryCommand.ExecuteGetScalar();
 	}
 
@@ -444,53 +443,6 @@ public class KiwiBlogApi {
 			Domain = ".kiwiandoesthings.place",
 			Expires = DateTimeOffset.UtcNow.AddDays(365)
 		});
-	}
-
-	public readonly struct SqlCommand : IDisposable {
-		public static SqliteConnection? database;
-		public readonly SqliteCommand command;
-
-		public static void Setup(SqliteConnection database) {
-			SqlCommand.database = database;
-		}
-	
-		public SqlCommand(string commandText, params (string name, object value)[] parameters) {
-			command = database!.CreateCommand();
-			command.CommandText = commandText;
-			foreach ((string name, object value) parameterTuple in parameters) {
-				command.Parameters.AddWithValue(parameterTuple.name, parameterTuple.value ?? DBNull.Value);
-			}
-		}
-
-		public async Task<int> Execute() {
-			return await command.ExecuteNonQueryAsync();
-		}
-
-		public async Task<object?> ExecuteGetScalar() {
-			return await command.ExecuteScalarAsync();
-		}
-
-		public async Task<List<object[]>> ExecuteGet() {
-			using SqliteDataReader reader = await command.ExecuteReaderAsync();
-			List<object[]> rows = [];
-			while (await reader.ReadAsync()) {
-				object[] row = new object[reader.FieldCount];
-				for (int i = 0; i < reader.FieldCount; i++) {
-					if (reader.IsDBNull(i)) {
-						Console.WriteLine("Got null value from expression: " + command.CommandText);
-						row[i] = "";
-                    } else {
-						row[i] = reader.GetValue(i);
-					}
-				}
-				rows.Add(row);
-			}
-			return rows;
-		}
-
-		public void Dispose() {
-			command.Dispose();
-		}
 	}
 
     public static bool ValidString(string toCheck) {

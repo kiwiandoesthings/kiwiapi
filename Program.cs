@@ -1,7 +1,10 @@
 namespace kiwiapi;
 
+using kiwiapi.ProtoCall;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.Data.Sqlite;
 using System.Net;
+using System.Security.Claims;
 using System.Text;
 
 using static BCrypt.Net.BCrypt;
@@ -12,11 +15,6 @@ public class Program {
     private static SocketsHttpHandler? handler;
 
 	public static void Main(string[] args) {
-        // I hate this line so much like wtf is this
-		string connectionString = "Data Source=" + Path.Combine(Directory.GetParent(Directory.GetParent(Directory.GetParent(Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)!.FullName)!.FullName)!.FullName)!.FullName, "protocall.db");
-        database = new SqliteConnection(connectionString);
-        database.Open();
-
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
         builder.WebHost.UseUrls("http://localhost:5201", "https://localhost:7164");
         builder.Services.AddAntiforgery();
@@ -36,13 +34,29 @@ public class Program {
                 policy.AllowCredentials();
             });
 
-            options.AddDefaultPolicy(policy => {
-                policy.WithOrigins("http://localhost:8000", "https://localhost:8000", "https://test.kiwiandoesthings.place", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiandoesthings.place", "https://www.kiwiandoesthings.place", "https://api.kiwiandoesthings.place", "https://protocall.kiwiandoesthings.place", "https://kiwiblog.kiwiandoesthings.place");
+            options.AddPolicy("ProtoCallPolicy", policy => {
+                policy.SetIsOriginAllowed(allowed => true);
                 policy.AllowAnyMethod();
                 policy.AllowAnyHeader();
                 policy.AllowCredentials();
             });
+
+            options.AddDefaultPolicy(policy => {
+                policy.SetIsOriginAllowed(origin => new Uri(origin).Host.EndsWith(".kiwiandoesthings.place") || new Uri(origin).Host == "localhost")
+                    .AllowAnyMethod()
+                    .AllowAnyHeader()
+                    .AllowCredentials();
+            });
         });
+        builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(options => {
+            options.Cookie.Name = "protocall_auth";
+            options.Cookie.HttpOnly = true;
+            options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+            options.Cookie.SameSite = SameSiteMode.Strict;
+            options.ExpireTimeSpan = TimeSpan.FromDays(365);
+            options.SlidingExpiration = true;
+        });
+        builder.Services.AddAuthorization();
         builder.Services.AddHostedService<Bot>();
 
         WebApplication app = builder.Build();
@@ -94,19 +108,21 @@ public class Program {
 
         client.DefaultRequestVersion = HttpVersion.Version11;
 
+        app.MapGet("/", () => Results.Ok("KiwiApi v1.0"));
+
         Ao3Api ao3 = new Ao3Api();
         ao3.MapApiFunctions(app);
 
         MiscellaneousApi miscellaneous = new MiscellaneousApi();
         miscellaneous.MapApiFunctions(app);
 
-        ProtoCallApi protocall = new ProtoCallApi();
-        protocall.MapApiFunctions(app);
+        ProtoCallHub protocall = new ProtoCallHub();
+        protocall.Setup(app);
 
 		KiwiBlogApi kiwiBlog = new KiwiBlogApi();
         kiwiBlog.MapApiFunctions(app);
 
-        app.MapHub<ProtoCallApi>("/protocall");
+        app.MapHub<ProtoCallHub>("/protocall/connect");
 
         app.MapControllers();
 
@@ -189,5 +205,63 @@ public class Program {
 
     public static string MakeUUID() {
         return Guid.NewGuid().ToString();
+    }
+
+    public readonly struct SqlCommand : IDisposable {
+        public readonly SqliteConnection? connection;
+        public readonly SqliteCommand command;
+
+        public SqlCommand(SqliteConnection connection, string commandText, params (string name, object value)[] parameters) {
+            command = connection.CreateCommand();
+            command.CommandText = commandText;
+            foreach ((string name, object value) parameterTuple in parameters) {
+                command.Parameters.AddWithValue("@" + parameterTuple.name, parameterTuple.value ?? DBNull.Value);
+            }
+        }
+
+        public async Task<int> Execute() {
+            return await command.ExecuteNonQueryAsync();
+        }
+
+        public async Task<object?> ExecuteGetScalar() {
+            return await command.ExecuteScalarAsync();
+        }
+
+        public async Task<List<object[]>> ExecuteGet() {
+            using SqliteDataReader reader = await command.ExecuteReaderAsync();
+            List<object[]> rows = [];
+            while (await reader.ReadAsync()) {
+                object[] row = new object[reader.FieldCount];
+                for (int i = 0; i < reader.FieldCount; i++) {
+                    if (reader.IsDBNull(i)) {
+                        Console.WriteLine("Got null value from expression: " + command.CommandText);
+                        row[i] = "";
+                    } else {
+                        row[i] = reader.GetValue(i);
+                    }
+                }
+                rows.Add(row);
+            }
+            return rows;
+        }
+
+        public void Dispose() {
+            command.Dispose();
+        }
+    }
+
+    public class SqlInterface {
+        public static string? databaseConnectionString;
+
+        public SqlInterface(string databaseConnectionString) { 
+            SqlInterface.databaseConnectionString = databaseConnectionString;
+        }
+
+        public SqlCommand Command(string commandText, params (string name, object value)[] parameters) {
+            SqliteConnection connection = new SqliteConnection(databaseConnectionString);
+            connection.Open();
+
+            return new SqlCommand(connection, commandText, parameters);
+        }
     }
 }
