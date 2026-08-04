@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using SkiaSharp;
+using System.Net;
 using System.Security.Claims;
 
 using static Program;
@@ -14,6 +15,9 @@ public class ProtocallApi {
     private readonly Logger logger;
     private readonly string? catboxHash;
     private readonly SqlInterface sql;
+    private readonly SocketsHttpHandler handler = null!;
+    private readonly HttpClient client = null!;
+    private readonly SqliteConnection database = null;
 
     public ProtocallApi(Logger logger, string? catboxHash) {
         this.logger = logger;
@@ -31,6 +35,25 @@ public class ProtocallApi {
             logger.WARN("Could not find environment variable \"CATBOX_USER_HASH\"");
             return;
         }
+
+        handler = new SocketsHttpHandler() {
+            AutomaticDecompression = DecompressionMethods.All,
+            UseCookies = true,
+            CookieContainer = new CookieContainer(),
+            SslOptions = new System.Net.Security.SslClientAuthenticationOptions {
+                EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13
+            },
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            MaxConnectionsPerServer = 10,
+            ConnectCallback = async (context, cancellationToken) => {
+                var entry = await Dns.GetHostEntryAsync(context.DnsEndPoint.Host, System.Net.Sockets.AddressFamily.InterNetwork, cancellationToken);
+                var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+                await socket.ConnectAsync(entry.AddressList, context.DnsEndPoint.Port, cancellationToken);
+                return new System.Net.Sockets.NetworkStream(socket, true);
+            }
+        };
+
+        client = new HttpClient(handler);
     }
 
     public void MapApiFunctions(WebApplication app) {

@@ -12,6 +12,7 @@ using static Program;
 public class ProtoCallHub : Hub {
 	private static readonly Logger logger = new Logger("PTC");
 	private static ProtocallApi api = null!;
+    private static SqliteConnection database = null;
 
     public static readonly ConcurrentDictionary<string, bool> userConnections = new();
 	public static readonly string? catboxHash = Environment.GetEnvironmentVariable("CATBOX_USER_HASH");
@@ -23,7 +24,7 @@ public class ProtoCallHub : Hub {
 		api = new ProtocallApi(logger, catboxHash);
 
 		api.MapApiFunctions(app);
-	}
+    }
 
 	public override async Task OnConnectedAsync() {
         if (Context.User?.Identity?.IsAuthenticated != true) {
@@ -61,21 +62,21 @@ public class ProtoCallHub : Hub {
 			await Clients.Caller.SendAsync("push_serverMessage", "Authentication error. Please log out and in again.");
             return;
         }
-
+    
         string userID = Context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value!;
-
+    
         if (await UserAccessLevelInRoom(userID, roomID) < 0) {
             await Clients.Caller.SendAsync("push_serverMessage", "You do not have access to this room!");
             return;
         }
-
+    
         logger.INFO("Got message from user with ID " + userID + " in room with ID " + roomID + " and content of \"" + message + "\"");
-
+    
         using SqliteCommand idCommand = database!.CreateCommand();
         idCommand.CommandText = "SELECT IFNULL(MAX(local_id), 0) + 1 FROM messages WHERE room_id = $roomID";
         idCommand.Parameters.AddWithValue("$roomID", roomID);
         int localID = (int)(long)idCommand.ExecuteScalar()!;
-
+    
         using SqliteCommand sendCommand = database!.CreateCommand();
         sendCommand.CommandText = "INSERT INTO messages (content, author_id, local_id, room_id, created_at) VALUES ($message, $userID, $localID, $roomID, $messageTimestamp); SELECT last_insert_rowid();";
         sendCommand.Parameters.AddWithValue("$message", message);
@@ -84,7 +85,7 @@ public class ProtoCallHub : Hub {
         sendCommand.Parameters.AddWithValue("$roomID", roomID);
         sendCommand.Parameters.AddWithValue("$messageTimestamp", messageTimestamp);
         int newId = (int)(long)sendCommand.ExecuteScalar()!;
-
+    
         MessagesData[] messageData = {
             new MessagesData(userID, message, newId, messageTimestamp)
         };
@@ -96,28 +97,28 @@ public class ProtoCallHub : Hub {
             await Clients.Caller.SendAsync("push_serverMessage", "Authentication error. Please log out and in again.");
             return;
         }
-
+    
         string userID = Context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value!;
-
+    
         if (await UserAccessLevelInRoom(userID, roomID) < 0) {
             await Clients.Caller.SendAsync("push_serverMessage", "You do not have access to this room!");
             return;
         }
-
+    
         if (messageIndex == -1) {
             using SqliteCommand latestIDCommand = database!.CreateCommand();
             latestIDCommand.CommandText = "SELECT IFNULL(MAX(Id), 0) FROM Messages";
             messageIndex = (int)(long)latestIDCommand.ExecuteScalar()!;
         }
-
+    
         List<MessagesData> messages = new();
-
+    
         using SqliteCommand getCommand = database!.CreateCommand();
         getCommand.CommandText = "SELECT local_id, content, author_id, created_at FROM (SELECT local_id, content, author_id, created_at FROM messages WHERE local_id <= $messageIndex AND room_id = $roomID ORDER BY local_id DESC LIMIT $amount) ORDER BY local_id ASC";
         getCommand.Parameters.AddWithValue("$messageIndex", messageIndex);
         getCommand.Parameters.AddWithValue("$amount", messageCount);
         getCommand.Parameters.AddWithValue("$roomID", roomID);
-
+    
         using SqliteDataReader reader = await getCommand.ExecuteReaderAsync();
         while (await reader.ReadAsync()) {
             messages.Add(new MessagesData(
@@ -126,7 +127,7 @@ public class ProtoCallHub : Hub {
                 reader.GetInt32(0),
                 reader.GetString(3)
             ));
-
+    
         }
         await Clients.Caller.SendAsync("push_recieveMessages", messages);
     }
@@ -138,14 +139,14 @@ public class ProtoCallHub : Hub {
 		roomCommand.Parameters.AddWithValue("$authorID", ownerID);
 		roomCommand.Parameters.AddWithValue("$isPublic", isPublic ? "PUBLIC" : "PRIVATE");
 		int roomID = (int)(await roomCommand.ExecuteScalarAsync() as long? ?? -1);
-
+    
 		using SqliteCommand accessCommand = database!.CreateCommand();
 		accessCommand.CommandText = "INSERT INTO roomAccess (room_id, user_id, access_level) VALUES ($roomID, $userID, $accessLevel)";
 		accessCommand.Parameters.AddWithValue("$roomID", roomID);
 		accessCommand.Parameters.AddWithValue("$userID", ownerID);
 		accessCommand.Parameters.AddWithValue("$accessLevel", 2);
 		await accessCommand.ExecuteNonQueryAsync();
-
+    
 		return roomID;
 	}
 
@@ -185,7 +186,7 @@ public class ProtoCallHub : Hub {
 		queryCommand.CommandText = "SELECT 1 FROM users WHERE user_id = $userID";
 		queryCommand.Parameters.AddWithValue("$userID", userID);
 		object? result = await queryCommand.ExecuteScalarAsync();
-
+    
 		return result != null;
 	}
 
@@ -198,7 +199,7 @@ public class ProtoCallHub : Hub {
 		if (await reader.ReadAsync()) {
 			result = reader.GetInt32(0);
 		}
-
+    
 		return result != null ? (int)result : -1;
 	}
 
@@ -209,17 +210,17 @@ public class ProtoCallHub : Hub {
 			}
 			return 0;
 		}
-
+    
 		using SqliteCommand getCommand = database!.CreateCommand();
 		getCommand.CommandText = "SELECT access_level FROM roomAccess WHERE user_id = $userID AND room_id = $roomID";
 		getCommand.Parameters.AddWithValue("$userID", userID);
 		getCommand.Parameters.AddWithValue("$roomID", roomID);
 		object? result = await getCommand.ExecuteScalarAsync()!;
-
+    
 		if (result != null && result != DBNull.Value) {
 			return (int)(long)result;
 		}
-
+    
 		return -1;
 	}
 
