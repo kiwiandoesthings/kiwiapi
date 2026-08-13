@@ -24,7 +24,7 @@ public class Ao3Api {
 
 	public IResult GetAo3ApiResponse(string file, string[] arguments) {
 		ProcessStartInfo start = new ProcessStartInfo();
-        string pythonPath = "python";
+        string pythonPath = "python3";
 
         if (!File.Exists(pythonPath)) {
             logger.ERR("No python was found at " + pythonPath);
@@ -35,7 +35,7 @@ public class Ao3Api {
 
         string pythonFile = Path.Combine(Environment.CurrentDirectory, file + ".py");
         if (!File.Exists(pythonFile)) {
-			logger.ERR("Could not find python file at " + pythonFile);
+			logger.ERR("Could not find python file at \"" + pythonFile + "\"");
 		}
 		start.ArgumentList.Add(pythonFile);
 		foreach (string argument in arguments) {
