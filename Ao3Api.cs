@@ -36,11 +36,21 @@ public class Ao3Api {
         start.RedirectStandardError = true;
         start.CreateNoWindow = true;
 		start.StandardOutputEncoding = Encoding.UTF8;
+        start.StandardErrorEncoding = Encoding.UTF8;
 
-		using Process? process = Process.Start(start);
-		using StreamReader reader = process!.StandardOutput;
-		string result = reader.ReadToEnd();
+        using Process? process = Process.Start(start);
+        if (process == null) {
+            return Results.InternalServerError("Failed to start Python process.");
+        }
+        string result = process.StandardOutput.ReadToEnd();
+        string errors = process.StandardError.ReadToEnd();
+        process.WaitForExit();
 
-		return Results.Content(result, "application/json");
-	}
+        if (!string.IsNullOrEmpty(errors)) {
+            logger.ERR("Python Error: " + errors);
+            return Results.Json(new { error = errors });
+        }
+
+        return Results.Json(result);
+    }
 }
