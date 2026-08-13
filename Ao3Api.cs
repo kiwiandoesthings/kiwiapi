@@ -3,6 +3,8 @@ namespace kiwiapi;
 using System.Diagnostics;
 using System.Text;
 
+using static Program;
+
 public class Ao3Api {
 	private Logger logger = new Logger("Ao3");
 
@@ -22,9 +24,20 @@ public class Ao3Api {
 
 	public IResult GetAo3ApiResponse(string file, string[] arguments) {
 		ProcessStartInfo start = new ProcessStartInfo();
-		start.FileName = "python";
-		string pythonFile = Path.Combine(Environment.CurrentDirectory, file + ".py");
-		if (!File.Exists(pythonFile)) {
+        string pythonPath = "python";
+        if (!OperatingSystem.IsWindows()) {
+            pythonPath = Path.Combine(Path.Combine(Environment.CurrentDirectory, "env"), "bin", "python");
+        }
+
+        if (!File.Exists(pythonPath)) {
+            logger.ERR("No python was found at " + pythonPath);
+            return ServerError("Failed to find Python executable.");
+        }
+
+        start.FileName = pythonPath;
+
+        string pythonFile = Path.Combine(Environment.CurrentDirectory, file + ".py");
+        if (!File.Exists(pythonFile)) {
 			logger.ERR("Could not find python file at " + pythonFile);
 		}
 		start.ArgumentList.Add(pythonFile);
@@ -40,7 +53,7 @@ public class Ao3Api {
 
         using Process? process = Process.Start(start);
         if (process == null) {
-            return Results.InternalServerError("Failed to start Python process.");
+            return ServerError("Failed to start Python process.");
         }
         string result = process.StandardOutput.ReadToEnd();
         string errors = process.StandardError.ReadToEnd();
