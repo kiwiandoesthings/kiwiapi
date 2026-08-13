@@ -71,8 +71,8 @@ public class Program {
         MiscellaneousApi miscellaneous = new MiscellaneousApi();
         miscellaneous.MapApiFunctions(app);
 
-        ProtoCallHub protocall = new ProtoCallHub();
-        protocall.Setup(app);
+        //ProtoCallHub protocall = new ProtoCallHub();
+        //protocall.Setup(app);
 
 		KiwiBlogApi kiwiBlog = new KiwiBlogApi();
         kiwiBlog.MapApiFunctions(app);
