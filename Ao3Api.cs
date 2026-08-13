@@ -62,5 +62,5 @@ public class Ao3Api {
         }
 
         return Results.Json(result);
-    }z
+    }
 }
