@@ -25,9 +25,6 @@ public class Ao3Api {
 	public IResult GetAo3ApiResponse(string file, string[] arguments) {
 		ProcessStartInfo start = new ProcessStartInfo();
         string pythonPath = "python";
-        if (!OperatingSystem.IsWindows()) {
-            pythonPath = Path.Combine(Path.Combine(Environment.CurrentDirectory, "env"), "bin", "python");
-        }
 
         if (!File.Exists(pythonPath)) {
             logger.ERR("No python was found at " + pythonPath);
@@ -65,5 +62,5 @@ public class Ao3Api {
         }
 
         return Results.Json(result);
-    }
+    }z
 }
