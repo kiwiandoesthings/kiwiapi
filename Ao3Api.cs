@@ -34,9 +34,6 @@ public class Ao3Api {
         start.FileName = pythonPath;
 
         string pythonFile = Path.Combine(Environment.CurrentDirectory, file + ".py");
-        if (!File.Exists(pythonFile)) {
-			logger.ERR("Could not find python file at \"" + pythonFile + "\"");
-		}
 		start.ArgumentList.Add(pythonFile);
 		foreach (string argument in arguments) {
             start.ArgumentList.Add(argument);
