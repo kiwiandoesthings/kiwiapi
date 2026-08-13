@@ -22,31 +22,34 @@ public class Ao3Api {
 		});
 	}
 
-	public IResult GetAo3ApiResponse(string file, string[] arguments) {
-		ProcessStartInfo start = new ProcessStartInfo();
-        string pythonPath = "python3";
-
-        start.FileName = pythonPath;
-
+    public IResult GetAo3ApiResponse(string file, string[] arguments) {
+        ProcessStartInfo start = new ProcessStartInfo();
         string pythonFile = Path.Combine(Environment.CurrentDirectory, file + ".py");
+
         if (!File.Exists(pythonFile)) {
-			logger.ERR("Could not find python file at \"" + pythonFile + "\"");
-		}
-		start.ArgumentList.Add(pythonFile);
-		foreach (string argument in arguments) {
-            start.ArgumentList.Add(argument);
+            logger.ERR("Could not find python file at \"" + pythonFile + "\"");
         }
-		start.UseShellExecute = false;
-		start.RedirectStandardOutput = true;
+
+        start.FileName = "bash";
+        start.ArgumentList.Add("-c");
+        string argumentsString = "";
+        foreach (string arg in arguments) {
+            argumentsString += $"\"{arg.Replace("\"", "\\\"")}\" ";
+        }
+        start.ArgumentList.Add($"python3 \"{pythonFile}\" {argumentsString.Trim()}");
+
+        start.UseShellExecute = false;
+        start.RedirectStandardOutput = true;
         start.RedirectStandardError = true;
         start.CreateNoWindow = true;
-		start.StandardOutputEncoding = Encoding.UTF8;
+        start.StandardOutputEncoding = Encoding.UTF8;
         start.StandardErrorEncoding = Encoding.UTF8;
 
         using Process? process = Process.Start(start);
         if (process == null) {
             return ServerError("Failed to start Python process.");
         }
+
         string result = process.StandardOutput.ReadToEnd();
         string errors = process.StandardError.ReadToEnd();
         process.WaitForExit();
