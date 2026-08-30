@@ -56,9 +56,11 @@ public class Program {
         });
         builder.Services.AddAuthorization();
         builder.Services.AddHostedService<Bot>();
+        builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+        builder.Services.AddProblemDetails();
 
         WebApplication app = builder.Build();
-		//app.UseExceptionHandler("/error");
+        app.UseExceptionHandler();
 		app.UseHsts();
 		app.UseRouting();
         app.UseCors();
@@ -133,6 +135,10 @@ public class Program {
 
     public static string MakeUUID() {
         return Guid.NewGuid().ToString();
+    }
+
+    public static string GetExceptionMessage(Exception exception) {
+        return "Encountered unknown error. Report the following as well as any relevant information to Kiwian: \"" + exception.Message + "\"";
     }
 
     public readonly struct SqlCommand : IDisposable {
