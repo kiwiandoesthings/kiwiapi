@@ -12,13 +12,21 @@ public class Ao3Api {
 		app.MapGet("/getao3storyid", async (HttpContext context, string storyTitle, int page) => {
 			logger.INFO("Getting story ID from searching \"" + storyTitle + "\" on page " + page);
 
-			return GetAo3ApiResponse("search", [storyTitle, page.ToString()]);
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            IResult result = GetAo3ApiResponse("search", [storyTitle, page.ToString()]);
+            logger.INFO("Took " + stopwatch.Elapsed.Milliseconds + "ms to search for \"" + storyTitle + "\"");
+
+            return result;
 		});
 
 		app.MapGet("/getao3text", async (HttpContext context, int storyID, int page) => {
 			logger.INFO("Getting text from storyID " + storyID + " on chapter " + page);
 
-			return GetAo3ApiResponse("text", [storyID.ToString(), page.ToString()]);
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            IResult result = GetAo3ApiResponse("text", [storyID.ToString(), page.ToString()]);
+            logger.INFO("Took " + stopwatch.Elapsed.Milliseconds + "ms to get text for \"" + storyID + "\"");
+
+            return result;
 		});
 	}
 
