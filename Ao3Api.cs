@@ -14,7 +14,7 @@ public class Ao3Api {
 
             Stopwatch stopwatch = Stopwatch.StartNew();
             IResult result = GetAo3ApiResponse("search", [storyTitle, page.ToString()]);
-            logger.INFO("Took " + stopwatch.Elapsed.Milliseconds + "ms to search for \"" + storyTitle + "\"");
+            logger.INFO("Took " + stopwatch.ElapsedMilliseconds + "ms to search for \"" + storyTitle + "\"");
 
             return result;
 		});
@@ -24,7 +24,7 @@ public class Ao3Api {
 
             Stopwatch stopwatch = Stopwatch.StartNew();
             IResult result = GetAo3ApiResponse("text", [storyID.ToString(), page.ToString()]);
-            logger.INFO("Took " + stopwatch.Elapsed.Milliseconds + "ms to get text for \"" + storyID + "\"");
+            logger.INFO("Took " + stopwatch.ElapsedMilliseconds + "ms to get text for \"" + storyID + "\"");
 
             return result;
 		});
