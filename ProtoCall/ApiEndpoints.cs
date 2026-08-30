@@ -11,6 +11,8 @@ using static Program;
 using static ProtoCallHub;
 
 public class ProtocallApi {
+    private static readonly string[] allowedMimeTypes = { "image/jpeg", "image/png", "image/gif" };
+
     private readonly Logger logger;
     private readonly string? catboxHash;
     private readonly SqlInterface sql;
@@ -53,7 +55,6 @@ public class ProtocallApi {
         api.MapPost("/push_registerAccount", async (HttpContext context, [FromForm] string username, [FromForm] string password, [FromForm] string color, [FromForm] IFormFile? profilePicture) => {
             logger.INFO("Attempting registration with username \"" + username + "\", password \"" + password + "\", and color \"" + color + "\"");
 
-            string[] allowedMimeTypes = { "image/jpeg", "image/png", "image/gif" };
             string profilePictureType = profilePicture == null ? "" : profilePicture.ContentType.ToLower();
             long profilePictureSize = profilePicture == null ? long.MaxValue : profilePicture.Length;
             string profilePictureUrl = "";

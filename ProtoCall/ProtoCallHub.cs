@@ -159,9 +159,9 @@ public class ProtoCallHub : Hub {
 	}
 
 	public static bool ValidUserColor(string hex) {
-		int red = Convert.ToInt32(hex.Substring(0, 2), 16);
-		int green = Convert.ToInt32(hex.Substring(2, 2), 16);
-		int blue = Convert.ToInt32(hex.Substring(4, 2), 16);
+		int red = Convert.ToInt32(hex[0.. 2], 16);
+		int green = Convert.ToInt32(hex[2.. 2], 16);
+		int blue = Convert.ToInt32(hex[4.. 2], 16);
 
 		double brightness = (red * 0.299) + (green * 0.587) + (blue * 0.114);
 

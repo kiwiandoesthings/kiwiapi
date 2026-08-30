@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 using static Program;
 
-public class KiwiBlogApi {
+public partial class KiwiBlogApi {
 	private readonly Logger logger;
 	private readonly SqlInterface sql;
 
@@ -43,6 +43,8 @@ public class KiwiBlogApi {
 
         if (!File.Exists(databasePath)) {
 			if (File.Exists(schemaPath)) {
+				Console.WriteLine("Couldn't find \"kiwiblog.db\" at \"" + databasePath + "\", creating from \"schema.sql\"");
+
                 string schemaSql = File.ReadAllText(schemaPath);
                 schemaSql = schemaSql.Replace("CREATE TABLE sqlite_sequence(name,seq);", "");
 
@@ -426,7 +428,7 @@ public class KiwiBlogApi {
 		return (string?)await queryCommand.ExecuteGetScalar();
 	}
 
-    private string GetHttpCookie(HttpContext context, string key) {
+    private static string GetHttpCookie(HttpContext context, string key) {
 		if (context.Request.Cookies.TryGetValue(key, out string? value)) {
 			return value ?? string.Empty;
 		}
@@ -434,7 +436,7 @@ public class KiwiBlogApi {
 		return string.Empty;
 	}
 
-    private void SetHttpCookie(HttpContext context, string key, string value) {
+    private static void SetHttpCookie(HttpContext context, string key, string value) {
 		context.Response.Cookies.Append(key, value, new CookieOptions{
 			HttpOnly = true,
 			Secure = true,
@@ -444,20 +446,29 @@ public class KiwiBlogApi {
 		});
 	}
 
+	[GeneratedRegex(@"^[a-zA-Z0-9\-_]+$")]
+	public static partial Regex ValidStringRegex();
+
     public static bool ValidString(string toCheck) {
-        return Regex.IsMatch(toCheck, @"^[a-zA-Z0-9\-_]+$");
+		return ValidStringRegex().IsMatch(toCheck);
     }
 
+    [GeneratedRegex(@"^[\x21-\x7E]+$")]
+    private static partial Regex AdvancedStringRegex();
+
     public static bool ValidAdvancedString(string toCheck) {
-        return Regex.IsMatch(toCheck, @"^[\x21-\x7E]+$");
+		return AdvancedStringRegex().IsMatch(toCheck);
     }
 
     public static bool ValidUsername(string username) {
         return username.Length >= 4 && username.Length <= 20 && ValidString(username);
     }
 
+    [GeneratedRegex(@"^[^\s@]+@[^\s@]+\.[^\s@]+$")]
+    private static partial Regex EmailRegex();
+
     public static bool ValidEmail(string email) {
-        return Regex.IsMatch(email, @"^[^\s@]+@[^\s@]+\.[^\s@]+$");
+        return EmailRegex().IsMatch(email);
     }
 
     public static bool ValidPassword(string password) {
