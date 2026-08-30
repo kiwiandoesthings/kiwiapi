@@ -8,7 +8,9 @@ using System.Text;
 using static BCrypt.Net.BCrypt;
 
 public class Program {
-	public static void Main(string[] args) {
+    public static readonly string realBasePath = Directory.GetParent(Directory.GetParent(Directory.GetParent(Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)!.FullName)!.FullName)!.FullName)!.FullName;
+
+    public static void Main(string[] args) {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
         builder.WebHost.UseUrls("http://localhost:5201", "https://localhost:7164");
         builder.Services.AddAntiforgery();
@@ -73,8 +75,7 @@ public class Program {
         MiscellaneousApi miscellaneous = new MiscellaneousApi();
         miscellaneous.MapApiFunctions(app);
 
-        //ProtoCallHub protocall = new ProtoCallHub();
-        //protocall.Setup(app);
+        ProtoCallHub.Setup(app);
 
 		KiwiBlogApi kiwiBlog = new KiwiBlogApi();
         kiwiBlog.MapApiFunctions(app);

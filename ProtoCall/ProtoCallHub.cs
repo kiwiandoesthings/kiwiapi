@@ -21,12 +21,14 @@ public class ProtoCallHub : Hub {
 	public record RoomResult(string roomName, int roomID);
 
 	public static void Setup(WebApplication app) {
-        string databasePath = Path.Combine(AppContext.BaseDirectory, "protocall.db");
+        string databasePath = Path.Combine(realBasePath, "protocall.db");
         string connectionString = "Data Source=" + databasePath;
         sql = new SqlInterface(connectionString);
 
         if (!File.Exists(databasePath)) {
             throw new FileNotFoundException("Couldn't find \"protocall.db\" at \"" + databasePath + "\".");
+        } else {
+            logger.INFO("Found \"protocall.db\" at \"" + databasePath + "\"");
         }
 
         api = new ProtocallApi(logger, catboxHash, sql);

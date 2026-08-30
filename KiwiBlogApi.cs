@@ -29,8 +29,8 @@ public partial class KiwiBlogApi {
 	public KiwiBlogApi() {
 		logger = new Logger("KWB");
 
-        string databasePath = Path.Combine(AppContext.BaseDirectory, "kiwiblog.db");
-        string schemaPath = Path.Combine(AppContext.BaseDirectory, "schema.sql");
+        string databasePath = Path.Combine(realBasePath, "kiwiblog.db");
+        string schemaPath = Path.Combine(realBasePath, "schema.sql");
         string connectionString = "Data Source=" + databasePath;
 		sql = new SqlInterface(connectionString);
 
@@ -54,6 +54,8 @@ public partial class KiwiBlogApi {
             } else {
 				throw new FileNotFoundException("Couldn't find \"kiwiblog.db\" at \"" + databasePath + "\" and couldn't find a \"schmea.sql\" file in the same directory to create from.");
 			}
+        } else {
+            logger.INFO("Found \"kiwiblog.db\" at \"" + databasePath + "\"");
         }
     }
 	
