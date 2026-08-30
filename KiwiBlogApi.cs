@@ -91,7 +91,21 @@ public partial class KiwiBlogApi {
 				return BadRequest("You must provide a blog name, email, and password");
 			}
 
-			string blogID = MakeUUID();
+			using SqlCommand usernameConflictCommand = sql.Command("SELECT name FROM blogs WHERE name = @name",
+				("@name", registration.name));
+			List<object[]> nameConflicts = await usernameConflictCommand.ExecuteGet();
+			if (nameConflicts.Count > 0) {
+				return BadRequest("That username is already taken");
+			}
+
+            using SqlCommand emailConflictCommand = sql.Command("SELECT email FROM blogs WHERE email = @email",
+                ("@email", registration.email));
+            List<object[]> emailConflicts = await emailConflictCommand.ExecuteGet();
+            if (emailConflicts.Count > 0) {
+                return BadRequest("That email is already being used");
+            }
+
+            string blogID = MakeUUID();
 			using SqlCommand registerBlogCommand = sql.Command("INSERT INTO blogs (blog_id, name, email, password_hash, email_public) VALUES (@blog_id, @name, @email, @password_hash, @email_public)",
 				("blog_id", blogID),
 				("name", registration.name),
