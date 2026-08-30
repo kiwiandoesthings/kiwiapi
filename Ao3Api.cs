@@ -31,7 +31,7 @@ public class Ao3Api {
         }
 
         start.FileName = "python3";
-        start.ArgumentList.Add(file);
+        start.ArgumentList.Add(file + ".py");
         foreach (string argument in arguments) {
             start.ArgumentList.Add(argument);
         }
