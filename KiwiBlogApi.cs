@@ -29,14 +29,9 @@ public class KiwiBlogApi {
 	public KiwiBlogApi() {
 		logger = new Logger("KWB");
 
-        string basePath = Directory.GetParent(Directory.GetParent(Directory.GetParent(Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)!.FullName)!.FullName)!.FullName)!.FullName;
-        string dbPath = Path.Combine(basePath, "kiwiblog.db");
-        string schemaPath = Path.Combine(basePath, "schema.sql");
-
-        bool dbExists = File.Exists(dbPath);
-
-        string connectionString = "Data Source=" + dbPath;
-
+        string databasePath = Path.Combine(AppContext.BaseDirectory, "kiwiblog.db");
+        string schemaPath = Path.Combine(AppContext.BaseDirectory, "schema.sql");
+        string connectionString = "Data Source=" + databasePath;
 		sql = new SqlInterface(connectionString);
 
 		using SqliteConnection connection = new SqliteConnection(connectionString);
@@ -46,7 +41,7 @@ public class KiwiBlogApi {
         walCommand.CommandText = "PRAGMA journal_mode=WAL;";
         walCommand.ExecuteNonQuery();
 
-        if (!dbExists && File.Exists(schemaPath)) {
+        if (!File.Exists(databasePath) && File.Exists(schemaPath)) {
             string schemaSql = File.ReadAllText(schemaPath);
             schemaSql = schemaSql.Replace("CREATE TABLE sqlite_sequence(name,seq);", "");
 

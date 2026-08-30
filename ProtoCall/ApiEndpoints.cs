@@ -3,7 +3,6 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.Sqlite;
 using SkiaSharp;
 using System.Net;
 using System.Security.Claims;
@@ -17,19 +16,11 @@ public class ProtocallApi {
     private readonly SqlInterface sql;
     private readonly SocketsHttpHandler handler = null!;
     private readonly HttpClient client = null!;
-    private readonly SqliteConnection database = null;
 
-    public ProtocallApi(Logger logger, string? catboxHash) {
+    public ProtocallApi(Logger logger, string? catboxHash, SqlInterface sql) {
         this.logger = logger;
         this.catboxHash = catboxHash;
-
-        string databasePath = Path.Combine(AppContext.BaseDirectory, "protocall.db");
-        string connectionString = "Data Source=" + databasePath;
-        sql = new SqlInterface(connectionString);
-
-        if (!File.Exists(databasePath)) {
-            throw new FileNotFoundException("Couldn't find \"protocall.db\" at \"" + databasePath + "\"");
-        }
+        this.sql = sql;
 
         if (catboxHash == null) {
             logger.WARN("Could not find environment variable \"CATBOX_USER_HASH\"");
@@ -143,7 +134,7 @@ public class ProtocallApi {
                 return BadRequest("There is already a user with that username.");
             }
 
-            using SqlCommand registerCommand = sql.Command("INSERT INTO users (user_id, username, color, password_hash, profile_picture_link) VALUES ($user_id, $username, $color, $password_hash, $profile_picture_link)",
+            using SqlCommand registerCommand = sql.Command("INSERT INTO users (user_id, username, color, password_hash, profile_picture_link) VALUES (@user_id, @username, @color, @password_hash, @profile_picture_link)",
                 ("user_id", userID.ToString()),
                 ("username", username),
                 ("color", color),
@@ -194,30 +185,29 @@ public class ProtocallApi {
         });
 
         api.MapGet("/request_userInfo", async (string userID) => {
-            using SqliteCommand queryCommand = database!.CreateCommand();
-            queryCommand.CommandText = "SELECT username, color, created_at FROM users WHERE user_id = $userID";
-            queryCommand.Parameters.AddWithValue("$userID", userID);
-            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
-            object? result = null;
-            while (await reader.ReadAsync()) {
-                result = new {
-                    userUsername = reader.GetString(0),
-                    userColor = reader.GetString(1),
-                    createdAt = reader.GetString(2)
-                };
+            using SqlCommand queryCommand = sql.Command("SELECT username, color, created_at FROM users WHERE user_id = @user_id",
+                ("user_id", userID));
+            List<object[]> info = await queryCommand.ExecuteGet();
+
+            if (info.Count == 0) {
+                return NotFound("No user with that ID was found");
             }
 
-            return result != null ? Results.Ok(result) : NotFound("No user with that ID was found");
+            return Results.Ok(new {
+                userUsername = info[0][0],
+                userColor = info[0][1],
+                createdAt = info[0][2]
+            });
         });
 
         api.MapGet("/request_userProfile", async (string userID) => {
-            using SqliteCommand queryCommand = database!.CreateCommand();
-            queryCommand.CommandText = "SELECT profile_picture_link, about_me FROM users WHERE user_id = $userID";
-            queryCommand.Parameters.AddWithValue("$userID", userID);
-            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
-            if (await reader.ReadAsync()) {
-                string? profilePictureUrl = await reader.IsDBNullAsync(0) ? "none" : reader.GetString(0);
-                string aboutMe = await reader.IsDBNullAsync(1) ? string.Empty : reader.GetString(1);
+            using SqlCommand queryCommand = sql.Command("SELECT profile_picture_link, about_me FROM users WHERE user_id = @user_id",
+                ("user_id", userID));
+            List<object[]> info = await queryCommand.ExecuteGet();
+
+            if (info.Count > 0) {
+                string profilePictureUrl = (string)info[0][0] == "" ? "none" : (string)info[0][0];
+                string aboutMe = (string)info[0][1];
 
                 return Results.Ok(new {
                     profilePictureUrl = profilePictureUrl,
@@ -229,36 +219,34 @@ public class ProtocallApi {
         });
 
         api.MapGet("/request_roomID", async (string roomName) => {
-            using SqliteCommand queryCommand = database!.CreateCommand();
-            queryCommand.CommandText = "SELECT id FROM rooms WHERE name = $roomName";
-            queryCommand.Parameters.AddWithValue("$roomName", roomName);
-            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
-            object? result = null;
-            if (await reader.ReadAsync()) {
-                result = new {
-                    roomID = reader.GetInt32(0)
-                };
+            using SqlCommand queryCommand = sql.Command("SELECT id FROM rooms WHERE name = @name",
+                ("name", roomName));
+            List<object[]> info = await queryCommand.ExecuteGet();
+
+            if (info.Count > 0) {
+                return Results.Ok(new {
+                    roomID = Convert.ToInt32(info[0][0])
+                });
             }
 
-            return result != null ? Results.Ok(result) : NotFound("No room with that name was found");
+            return NotFound("No room with that name was found");
         });
 
         api.MapGet("/request_roomInfo", async (int roomID) => {
-            using SqliteCommand queryCommand = database!.CreateCommand();
-            queryCommand.CommandText = "SELECT name, author_id, privacy, created_at FROM rooms WHERE id = $roomID";
-            queryCommand.Parameters.AddWithValue("$roomID", roomID);
-            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
-            object? result = null;
-            if (await reader.ReadAsync()) {
-                result = new {
-                    roomName = reader.GetString(0),
-                    authorID = reader.GetString(1),
-                    privacy = reader.GetString(2),
-                    createdAt = reader.GetString(3)
-                };
+            using SqlCommand queryCommand = sql.Command("SELECT name, author_id, privacy, created_at FROM rooms WHERE id = @room_id",
+                ("room_id", roomID));
+            List<object[]> info = await queryCommand.ExecuteGet();
+
+            if (info.Count > 0) {
+                return Results.Ok(new {
+                    roomName = (string)info[0][0],
+                    authorID = (string)info[0][1],
+                    privacy = (string)info[0][2],
+                    createdAt = (string)info[0][3]
+                });
             }
 
-            return result != null ? Results.Ok(result) : NotFound("No room with that ID was found");
+            return NotFound("No room with that ID was found");
         });
 
         api.MapGet("/request_roomSearch", async (HttpContext context, string targetName) => {
@@ -266,14 +254,14 @@ public class ProtocallApi {
                 return result;
             }
 
-            using SqliteCommand queryCommand = database!.CreateCommand();
-            queryCommand.CommandText = "SELECT id, name FROM rooms LEFT JOIN roomAccess ON id = room_id AND user_id = $userID WHERE name LIKE $targetName AND name != 'HomeRoom' AND (privacy = 'PUBLIC' OR (privacy = 'PRIVATE' AND access_level >= 0))";
-            queryCommand.Parameters.AddWithValue("$targetName", "%" + targetName + "%");
-            queryCommand.Parameters.AddWithValue("$userID", userID);
-            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            using SqlCommand queryCommand = sql.Command("SELECT id, name FROM rooms LEFT JOIN roomAccess ON id = room_id AND user_id = @user_id WHERE name LIKE @name AND name != 'HomeRoom' AND (privacy = 'PUBLIC' OR (privacy = 'PRIVATE' AND access_level >= 0))",
+                ("name", "%" + targetName + "%"),
+                ("user_id", userID));
+            List<object[]> info = await queryCommand.ExecuteGet();
+
             List<RoomResult> results = new();
-            while (await reader.ReadAsync()) {
-                results.Add(new RoomResult(reader.GetString(1), reader.GetInt32(0)));
+            foreach (object[] row in info) {
+                results.Add(new RoomResult((string)row[1], Convert.ToInt32(row[0])));
             }
 
             return Results.Ok(results);
@@ -286,10 +274,9 @@ public class ProtocallApi {
 
             logger.INFO("Attempting to delete account with userID \"" + userID + "\"");
 
-            using SqliteCommand deleteCommand = database!.CreateCommand();
-            deleteCommand.CommandText = "DELETE FROM users WHERE user_id = $userID";
-            deleteCommand.Parameters.AddWithValue("$userID", userID);
-            await deleteCommand.ExecuteNonQueryAsync();
+            using SqlCommand deleteCommand = sql.Command("DELETE FROM users WHERE user_id = @user_id",
+                ("user_id", userID));
+            await deleteCommand.Execute();
 
             await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
 
@@ -302,7 +289,6 @@ public class ProtocallApi {
             }
 
             int roomID = await CreateRoom(userID + " " + otherID, userID, false);
-
 
             return Results.Ok(new {
                 roomID = roomID,
@@ -338,11 +324,10 @@ public class ProtocallApi {
                 return BadRequest("Privacy must be either PUBLIC or PRIVATE, instead found \"" + newPrivacy + "\"");
             }
 
-            using SqliteCommand roomCommand = database!.CreateCommand();
-            roomCommand.CommandText = "UPDATE rooms SET privacy = $newPrivacy WHERE id = $roomID";
-            roomCommand.Parameters.AddWithValue("$newPrivacy", newPrivacy.ToUpper());
-            roomCommand.Parameters.AddWithValue("$roomID", roomID);
-            await roomCommand.ExecuteNonQueryAsync();
+            using SqlCommand roomCommand = sql.Command("UPDATE rooms SET privacy = @privacy WHERE id = @id",
+                ("privacy", newPrivacy.ToUpper()),
+                ("id", roomID));
+            await roomCommand.Execute();
 
             return Results.Ok();
         });
@@ -354,27 +339,27 @@ public class ProtocallApi {
         });
 
         api.MapGet("/request_usersWithAccessLevel", async (int accessLevel, int roomID) => {
-            using SqliteCommand queryCommand = database!.CreateCommand();
-            queryCommand.CommandText = "SELECT user_id FROM roomAccess WHERE room_id = $roomID AND access_level = $accessLevel";
-            queryCommand.Parameters.AddWithValue("$roomID", roomID);
-            queryCommand.Parameters.AddWithValue("$accessLevel", accessLevel);
-            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
+            using SqlCommand queryCommand = sql.Command("SELECT user_id FROM roomAccess WHERE room_id = @room_id AND access_level = @access_level",
+                ("room_id", roomID),
+                ("access_level", accessLevel));
+            List<object[]> info = await queryCommand.ExecuteGet();
+
             List<string> results = new();
-            while (await reader.ReadAsync()) {
-                results.Add(reader.GetString(0));
+            foreach (object[] row in info) {
+                results.Add((string)row[0]);
             }
 
             return Results.Ok(results);
         });
 
         api.MapGet("/request_userID", async (string userName) => {
-            using SqliteCommand queryCommand = database!.CreateCommand();
-            queryCommand.CommandText = "SELECT user_id FROM users WHERE username = $userName";
-            queryCommand.Parameters.AddWithValue("$userName", userName);
-            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
-            if (await reader.ReadAsync()) {
+            using SqlCommand queryCommand = sql.Command("SELECT user_id FROM users WHERE username = @username",
+                ("username", userName));
+            List<object[]> info = await queryCommand.ExecuteGet();
+
+            if (info.Count > 0) {
                 return Results.Ok(new {
-                    userID = reader.GetString(0)
+                    userID = (string)info[0][0]
                 });
             }
 
@@ -394,12 +379,11 @@ public class ProtocallApi {
                 return Unauthorized("You do not have moderator permissions in this room!");
             }
 
-            using SqliteCommand setCommand = database!.CreateCommand();
-            setCommand.CommandText = "INSERT INTO roomAccess (room_id, user_id, access_level) VALUES ($roomID, $userID, $accessLevel) ON CONFLICT(room_id, user_id) DO UPDATE SET access_level = $accessLevel";
-            setCommand.Parameters.AddWithValue("$roomID", roomID);
-            setCommand.Parameters.AddWithValue("$userID", otherID);
-            setCommand.Parameters.AddWithValue("$accessLevel", accessLevel);
-            await setCommand.ExecuteNonQueryAsync();
+            using SqlCommand setCommand = sql.Command("INSERT INTO roomAccess (room_id, user_id, access_level) VALUES (@room_id, @user_id, @access_level) ON CONFLICT(room_id, user_id) DO UPDATE SET access_level = @access_level",
+                ("room_id", roomID),
+                ("user_id", otherID),
+                ("access_level", accessLevel));
+            await setCommand.Execute();
 
             return Results.Ok();
         });
@@ -413,11 +397,10 @@ public class ProtocallApi {
                 return BadRequest("Username can only use \"A-z, 0-9, -, _\", and must be greater than 3 characters and shorter than 18. You may not name yourself \"System\" or \"Unknown User\".");
             }
 
-            using SqliteCommand command = database!.CreateCommand();
-            command.CommandText = "UPDATE users SET username = $newUsername WHERE user_id = $userID";
-            command.Parameters.AddWithValue("$newUsername", newUsername);
-            command.Parameters.AddWithValue("$userID", userID);
-            await command.ExecuteNonQueryAsync();
+            using SqlCommand command = sql.Command("UPDATE users SET username = @username WHERE user_id = @user_id",
+                ("username", newUsername),
+                ("user_id", userID));
+            await command.Execute();
 
             return Results.Ok();
         });
@@ -434,12 +417,12 @@ public class ProtocallApi {
                 hasModDeletionPermissions = true;
             }
 
-            SqliteCommand queryCommand = database!.CreateCommand();
-            queryCommand.CommandText = "SELECT author_id FROM MESSAGES where id = $messageID";
-            queryCommand.Parameters.AddWithValue("$messageID", messageID);
-            using SqliteDataReader reader = await queryCommand.ExecuteReaderAsync();
-            if (await reader.ReadAsync()) {
-                isOwnMessage = reader.GetString(0) == userID;
+            using SqlCommand queryCommand = sql.Command("SELECT author_id FROM messages WHERE id = @id",
+                ("id", messageID));
+            List<object[]> info = await queryCommand.ExecuteGet();
+
+            if (info.Count > 0) {
+                isOwnMessage = (string)info[0][0] == userID;
             }
 
             if (isDeletion) {
@@ -447,20 +430,18 @@ public class ProtocallApi {
                     return Unauthorized("You do not have permissions to delete other users' messages!");
                 }
 
-                SqliteCommand deleteCommand = database!.CreateCommand();
-                deleteCommand.CommandText = "DELETE FROM messages WHERE id = $messageID";
-                deleteCommand.Parameters.AddWithValue("$messageID", messageID);
-                await deleteCommand.ExecuteNonQueryAsync();
+                using SqlCommand deleteCommand = sql.Command("DELETE FROM messages WHERE id = @id",
+                    ("id", messageID));
+                await deleteCommand.Execute();
             } else {
                 if (!isOwnMessage) {
                     return Unauthorized("You cannot edit other users' messages!");
                 }
 
-                SqliteCommand editCommand = database!.CreateCommand();
-                editCommand.CommandText = "UPDATE messages SET content = $newMessageContent WHERE id = $messageID";
-                editCommand.Parameters.AddWithValue("$newMessageContent", newMessageContent);
-                editCommand.Parameters.AddWithValue("$messageID", messageID);
-                await editCommand.ExecuteNonQueryAsync();
+                using SqlCommand editCommand = sql.Command("UPDATE messages SET content = @content WHERE id = @id",
+                    ("content", newMessageContent),
+                    ("id", messageID));
+                await editCommand.Execute();
             }
 
             return Results.Ok();
