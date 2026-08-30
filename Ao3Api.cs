@@ -57,6 +57,6 @@ public class Ao3Api {
             return Results.Json(new { error = errors });
         }
 
-        return Results.Json(result);
+        return Results.Content(result, "application/json");
     }
 }
