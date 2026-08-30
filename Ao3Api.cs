@@ -30,13 +30,10 @@ public class Ao3Api {
             logger.ERR("Could not find python file at \"" + pythonFile + "\"");
         }
 
-        start.FileName = "bash";
-        start.ArgumentList.Add("-c");
-        string argumentsString = "";
-        foreach (string arg in arguments) {
-            argumentsString += $"\"{arg.Replace("\"", "\\\"")}\" ";
+        start.FileName = "python3";
+        foreach (string argument in arguments) {
+            start.ArgumentList.Add(argument);
         }
-        start.ArgumentList.Add($"python3 \"{pythonFile}\" {argumentsString.Trim()}");
 
         start.UseShellExecute = false;
         start.RedirectStandardOutput = true;
