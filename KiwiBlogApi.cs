@@ -37,17 +37,21 @@ public class KiwiBlogApi {
 		using SqliteConnection connection = new SqliteConnection(connectionString);
         connection.Open();
 
-        using var walCommand = connection.CreateCommand();
+        using SqliteCommand walCommand = connection.CreateCommand();
         walCommand.CommandText = "PRAGMA journal_mode=WAL;";
         walCommand.ExecuteNonQuery();
 
-        if (!File.Exists(databasePath) && File.Exists(schemaPath)) {
-            string schemaSql = File.ReadAllText(schemaPath);
-            schemaSql = schemaSql.Replace("CREATE TABLE sqlite_sequence(name,seq);", "");
+        if (!File.Exists(databasePath)) {
+			if (File.Exists(schemaPath)) {
+                string schemaSql = File.ReadAllText(schemaPath);
+                schemaSql = schemaSql.Replace("CREATE TABLE sqlite_sequence(name,seq);", "");
 
-            using var schemaCommand = connection.CreateCommand();
-            schemaCommand.CommandText = schemaSql;
-            schemaCommand.ExecuteNonQuery();
+                using SqliteCommand schemaCommand = connection.CreateCommand();
+                schemaCommand.CommandText = schemaSql;
+                schemaCommand.ExecuteNonQuery();
+            } else {
+				throw new FileNotFoundException("Couldn't find \"kiwiblog.db\" at \"" + databasePath + "\" and couldn't find a \"schmea.sql\" file in the same directory to create from.");
+			}
         }
     }
 	

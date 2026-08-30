@@ -26,7 +26,7 @@ public class ProtoCallHub : Hub {
         sql = new SqlInterface(connectionString);
 
         if (!File.Exists(databasePath)) {
-            throw new FileNotFoundException("Couldn't find \"protocall.db\" at \"" + databasePath + "\"");
+            throw new FileNotFoundException("Couldn't find \"protocall.db\" at \"" + databasePath + "\".");
         }
 
         api = new ProtocallApi(logger, catboxHash, sql);
