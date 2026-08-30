@@ -62,7 +62,6 @@ public class Ao3Api {
 
         if (!string.IsNullOrEmpty(errors)) {
             logger.ERR("Python Error: " + errors);
-            return Results.Json(new { error = errors });
         }
 
         return Results.Content(result, "application/json");
