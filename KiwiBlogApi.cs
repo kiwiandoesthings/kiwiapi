@@ -2,7 +2,6 @@ namespace kiwiapi;
 
 using Markdig;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.Sqlite;
 using System.Text.RegularExpressions;
 
 using static Program;
@@ -34,36 +33,7 @@ public partial class KiwiBlogApi {
 	public KiwiBlogApi() {
 		logger = new Logger("KWB");
 
-        string databasePath = Path.Combine(realBasePath, "kiwiblog.db");
-        string schemaPath = Path.Combine(realBasePath, "schema.sql");
-        string connectionString = "Data Source=" + databasePath;
-        bool databaseExists = File.Exists(databasePath);
-		
-		sql = new SqlInterface(connectionString);
-
-        using SqliteConnection connection = new SqliteConnection(connectionString);
-        connection.Open();
-
-        using SqliteCommand walCommand = connection.CreateCommand();
-        walCommand.CommandText = "PRAGMA journal_mode=WAL;";
-        walCommand.ExecuteNonQuery();
-
-        if (!databaseExists) {
-			if (File.Exists(schemaPath)) {
-				logger.WARN("Couldn't find \"kiwiblog.db\" at \"" + databasePath + "\", creating from \"schema.sql\"");
-
-                string schemaSql = File.ReadAllText(schemaPath);
-                schemaSql = schemaSql.Replace("CREATE TABLE sqlite_sequence(name,seq);", "");
-
-                using SqliteCommand schemaCommand = connection.CreateCommand();
-                schemaCommand.CommandText = schemaSql;
-                schemaCommand.ExecuteNonQuery();
-            } else {
-				throw new FileNotFoundException("Couldn't find \"kiwiblog.db\" at \"" + databasePath + "\" and couldn't find a \"schmea.sql\" file in the same directory to create from.");
-			}
-        } else {
-            logger.INFO("Found \"kiwiblog.db\" at \"" + databasePath + "\"");
-        }
+		sql = new SqlInterface("kiwiblog");
     }
 	
 	public void MapApiFunctions(WebApplication app) {

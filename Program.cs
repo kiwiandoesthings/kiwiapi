@@ -1,4 +1,4 @@
-namespace kiwiapi;
+ namespace kiwiapi;
 
 using kiwiapi.ProtoCall;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -9,9 +9,11 @@ using static BCrypt.Net.BCrypt;
 
 public class Program {
     public static readonly string realBasePath = Directory.GetParent(Directory.GetParent(Directory.GetParent(Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)!.FullName)!.FullName)!.FullName)!.FullName;
+    public static bool isDebug { get; private set; }
 
     public static void Main(string[] args) {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+        isDebug = builder.Environment.IsDevelopment();
         builder.WebHost.UseUrls("http://localhost:5201", "https://localhost:7164");
         builder.Services.AddAntiforgery();
         builder.WebHost.ConfigureKestrel(options => {
@@ -37,6 +39,15 @@ public class Program {
                 policy.AllowCredentials();
             });
 
+            options.AddPolicy("ForumsPolicy", policy => {
+                policy.SetIsOriginAllowed(origin => {
+                    return new Uri(origin).Host.EndsWith(".kiwiandoesthings.place");
+                });
+                policy.AllowAnyMethod();
+                policy.AllowAnyHeader();
+                policy.AllowCredentials();
+            });
+
             options.AddDefaultPolicy(policy => {
                 policy.SetIsOriginAllowed(origin => {
                     string host = new Uri(origin).Host;
@@ -46,11 +57,22 @@ public class Program {
                 .AllowCredentials();
             });
         });
-        builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(options => {
+        builder.Services.AddAuthentication(options => {
+            options.DefaultAuthenticateScheme = "FruitBowlAuth";
+            options.DefaultChallengeScheme = "FruitBowlAuth";
+        }).AddCookie("ProtoCallAuth", options => {
             options.Cookie.Name = "protocall_auth";
             options.Cookie.HttpOnly = true;
-            options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-            options.Cookie.SameSite = SameSiteMode.Strict;
+            options.Cookie.Domain = isDebug ? ".test.kiwiandoesthings.place" : ".kiwiandoesthings.place";
+            options.Cookie.SameSite = SameSiteMode.Lax;
+            options.ExpireTimeSpan = TimeSpan.FromDays(365);
+            options.SlidingExpiration = true;
+        }).AddCookie("FruitBowlAuth", options => {
+            options.Cookie.Name = "fruitbowl_auth";
+            options.Cookie.HttpOnly = true;
+            options.Cookie.SecurePolicy = isDebug ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
+            options.Cookie.SameSite = SameSiteMode.Lax;
+            options.Cookie.Domain = isDebug ? ".test.kiwiandoesthings.place" : ".kiwiandoesthings.place";
             options.ExpireTimeSpan = TimeSpan.FromDays(365);
             options.SlidingExpiration = true;
         });
@@ -69,7 +91,7 @@ public class Program {
         app.UseAntiforgery();
         app.MapOpenApi();
 
-        app.MapGet("/", () => Results.Ok("KiwiApi v1.0"));
+        app.MapGet("/", () => Results.Ok("KiwiApi v1.2"));
 
         Ao3Api ao3 = new Ao3Api();
         ao3.MapApiFunctions(app);
@@ -81,6 +103,9 @@ public class Program {
 
 		KiwiBlogApi kiwiBlog = new KiwiBlogApi();
         kiwiBlog.MapApiFunctions(app);
+
+        FruitBowlForums forums = new FruitBowlForums();
+        forums.MapApiFunctions(app);
 
         app.MapHub<ProtoCallHub>("/protocall/connect");
 
@@ -187,16 +212,52 @@ public class Program {
     }
 
     public class SqlInterface {
+        private static readonly Logger logger = new Logger("SQL");
         private readonly string databaseConnectionString;
 
-        public SqlInterface(string databaseConnectionString) { 
-            this.databaseConnectionString = databaseConnectionString;
+        public SqlInterface(string databaseName) {
+            this.databaseConnectionString = "Data Source=" + databaseName + ".db";
+
+            string databasePath = Path.Combine(realBasePath, databaseName + ".db");
+            string schemaPath = Path.Combine(realBasePath, databaseName + ".sql");
+
+            bool databaseExists = File.Exists(databasePath);
 
             using SqliteConnection connection = new SqliteConnection(databaseConnectionString);
             connection.Open();
-            using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "PRAGMA journal_mode = WAL;";
-            command.ExecuteNonQuery();
+
+            using SqliteCommand walCommand = connection.CreateCommand();
+            walCommand.CommandText = "PRAGMA journal_mode=WAL;";
+            walCommand.ExecuteNonQuery();
+
+            if (!databaseExists) {
+                if (File.Exists(schemaPath)) {
+                    logger.WARN("Couldn't find \"" + databaseName + ".db\" at \"" + databasePath + "\", creating from \"schema.sql\"");
+
+                    string schemaSql = File.ReadAllText(schemaPath);
+                    schemaSql = schemaSql.Replace("CREATE TABLE sqlite_sequence(name,seq);", "");
+
+                    using SqliteCommand schemaCommand = connection.CreateCommand();
+                    schemaCommand.CommandText = schemaSql;
+                    schemaCommand.ExecuteNonQuery();
+                } else {
+                    throw new FileNotFoundException("Couldn't find \"" + databaseName + ".db\" at \"" + databasePath + "\" and couldn't find a \"schema.sql\" file in the same directory to create from.");
+                }
+            } else {
+                logger.INFO("Found \"" + databaseName + ".db\" at \"" + databasePath + "\"");
+
+                using SqliteCommand schemaQuery = connection.CreateCommand();
+                schemaQuery.CommandText = "SELECT sql FROM sqlite_master WHERE sql NOT NULL AND type='table' AND name NOT LIKE 'sqlite_%';";
+
+                using SqliteDataReader reader = schemaQuery.ExecuteReader();
+                List<string> statements = [];
+                while (reader.Read()) {
+                    string sqlStatement = reader.GetString(0);
+                    statements.Add(sqlStatement + ";");
+                }
+
+                File.WriteAllText(schemaPath, string.Join("\n", statements));
+            }
         }
 
         public SqlCommand Command(string commandText, params (string name, object value)[] parameters) {
