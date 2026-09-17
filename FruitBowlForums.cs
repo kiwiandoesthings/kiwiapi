@@ -19,12 +19,8 @@ public class FruitBowlForums {
     private readonly Logger logger;
     private readonly SqlInterface sql;
     private readonly MarkdownPipeline markdown = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
-    private readonly SocketsHttpHandler handler = null!;
     private readonly HttpClient client = null!;
     private readonly string? catboxHash;
-
-    private record Login(string username, string password);
-    private record Update(string username, string description, string signature);
 
     public FruitBowlForums() {
         logger = new Logger("FBF");
@@ -139,7 +135,7 @@ public class FruitBowlForums {
             return Results.Ok(new {
                 id = userID,
                 username = (string)result[0][0],
-                profilePictureUrl = (string)result[0][1],
+                profile_picture_url = (string)result[0][1],
                 description = (string)result[0][2],
                 signature = (string)result[0][3],
                 created_at = (string)result[0][4]
@@ -159,11 +155,29 @@ public class FruitBowlForums {
             return Results.Ok(new {
                 id = (string)result[0][0],
                 username = username,
-                profilePictureUrl = (string)result[0][1],
+                profile_picture_url = (string)result[0][1],
                 description = (string)result[0][2],
                 signature = (string)result[0][3],
                 created_at = (string)result[0][4]
             });
+        });
+
+        group.MapGet("/users/search", async (string query, bool searchType) => {
+            string condition = searchType ? "LOWER(username) LIKE '%' || LOWER(@username) || '%'" : "id = @id";
+            string parameterName = searchType ? "username" : "id";
+            SqlCommand command = sql.Command("SELECT id, username, profile_picture_url, description, signature, created_at FROM users WHERE " + condition,
+                (parameterName, query)
+            );
+            List<object[]> results = await command.ExecuteGet();
+
+            return Results.Ok(results.Select(row => new {
+                id = (string)row[0],
+                username = (string)row[1],
+                profile_picture_url = (string)row[2],
+                description = (string)row[3],
+                signature = (string)row[4],
+                created_at = (string)row[5],
+            }).ToList());
         });
 
         group.MapGet("/users/self", async (HttpContext context) => {
@@ -181,29 +195,29 @@ public class FruitBowlForums {
             return Results.Ok(new {
                 id = userID,
                 username = (string)result[0][0],
-                profilePictureUrl = (string)result[0][1],
+                profile_picture_url = (string)result[0][1],
                 description = (string)result[0][2],
                 signature = (string)result[0][3]
             });
         }).RequireAuthorization();
 
-        group.MapPut("/users/self", async ([FromForm] Update update, HttpContext context) => {
+        group.MapPut("/users/self", async (string username, string description, string signature, HttpContext context) => {
             string userID = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value!;
 
             SqlCommand command = sql.Command("UPDATE users SET username = @username, description = @description, signature = @signature WHERE id = @id",
-                ("username", update.username),
-                ("description", update.description),
-                ("signature", update.signature),
+                ("username", username),
+                ("description", description),
+                ("signature", signature),
                 ("id", userID)
             );
             await command.Execute();
 
-            await LoginUser(context, userID, update.username);
+            await LoginUser(context, userID, username);
 
             return Results.Ok();
         }).RequireAuthorization();
 
-        group.MapPut("/users/self/password", async ([FromForm] string password, HttpContext context) => {
+        group.MapPut("/users/self/password", async (string password, HttpContext context) => {
             if (password.Length < 8 || password.Length > 32) {
                 return BadRequest("Password must be between 8 and 32 characters long inclusive");
             }
@@ -244,9 +258,9 @@ public class FruitBowlForums {
             return Results.Ok();
         }).RequireAuthorization();
 
-        group.MapPost("/auth", async ([FromForm] Login login, HttpContext context) => {
+        group.MapPost("/auth", async (string username, string password, HttpContext context) => {
             SqlCommand command = sql.Command("SELECT id, password_hash FROM users WHERE LOWER(username) = LOWER(@username)",
-                ("username", login.username)
+                ("username", username)
             );
             List<object[]> result = await command.ExecuteGet();
             if (result.Count == 0) {
@@ -255,13 +269,13 @@ public class FruitBowlForums {
             }
             string userID = (string)result[0][0];
             string storedPasswordHash = (string)result[0][1];
-            if (!VerifyHashedString(login.password, storedPasswordHash)) {
+            if (!VerifyHashedString(password, storedPasswordHash)) {
                 logger.INFO("Failed to log in user: Incorrect password");
                 return Unauthorized("Invalid username or password");
             }
 
             logger.INFO("Successfully logged in user with ID {" + userID + "}");
-            await LoginUser(context, userID, login.username);
+            await LoginUser(context, userID, username);
 
             return Results.Ok();
         });
@@ -350,7 +364,7 @@ public class FruitBowlForums {
             }).ToList());
         });
 
-        group.MapPost("/forums/{forum}/topics", async (string forum, [FromForm] string name, [FromForm] string description, HttpContext context) => {
+        group.MapPost("/forums/{forum}/topics", async (string forum, string name, string description, HttpContext context) => {
             string userID = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value!;
             string username = context.User.FindFirst(ClaimTypes.Name)?.Value!;
 
@@ -424,7 +438,7 @@ public class FruitBowlForums {
             });
         });
 
-        group.MapPost("/forums/{forum}/topics/{topic}/posts", async (HttpContext context, string forum, string topic, [FromForm] string content, [FromForm] bool showSignature = false) => {
+        group.MapPost("/forums/{forum}/topics/{topic}/posts", async (HttpContext context, string forum, string topic, string content, bool showSignature = false) => {
             if (content.Length < 1 || content.Length > 10000) {
                 return BadRequest("Content must be between 1 and 10000 characters long inclusive");
             }
@@ -451,7 +465,7 @@ public class FruitBowlForums {
             string username = context.User.FindFirst(ClaimTypes.Name)?.Value!;
 
             string? forumID = await GetForumID(forum);
-            string? topicID = await GetTopicID(forumID, topic);
+            string? topicID = await GetTopicID(forumID!, topic);
 
             if (postID == -1) {
                 SqlCommand queryCommand = sql.Command("SELECT id, creator_id, created_at FROM posts WHERE topic_id = @topic_id ORDER BY id DESC LIMIT 1",
