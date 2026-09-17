@@ -33,7 +33,9 @@ public class Program {
             });
 
             options.AddPolicy("ProtoCallPolicy", policy => {
-                policy.SetIsOriginAllowed(allowed => true);
+                policy.SetIsOriginAllowed(origin => {
+					return new Uri(origin).Host.EndsWith(".kiwiandoesthings.place");
+				});
                 policy.AllowAnyMethod();
                 policy.AllowAnyHeader();
                 policy.AllowCredentials();
@@ -63,8 +65,9 @@ public class Program {
         }).AddCookie("ProtoCallAuth", options => {
             options.Cookie.Name = "protocall_auth";
             options.Cookie.HttpOnly = true;
-            options.Cookie.Domain = isDebug ? ".test.kiwiandoesthings.place" : ".kiwiandoesthings.place";
+			options.Cookie.SecurePolicy = isDebug ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
             options.Cookie.SameSite = SameSiteMode.Lax;
+			options.Cookie.Domain = isDebug ? ".test.kiwiandoesthings.place" : ".kiwiandoesthings.place";
             options.ExpireTimeSpan = TimeSpan.FromDays(365);
             options.SlidingExpiration = true;
         }).AddCookie("FruitBowlAuth", options => {
