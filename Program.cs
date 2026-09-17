@@ -216,25 +216,26 @@ public class Program {
         private readonly string databaseConnectionString;
 
         public SqlInterface(string databaseName) {
-            this.databaseConnectionString = "Data Source=" + databaseName + ".db";
+            string realDatabaseName = Path.Combine("storage", databaseName);
+            databaseConnectionString = "Data Source=" + realDatabaseName + ".db";
 
-            string databasePath = Path.Combine(realBasePath, databaseName + ".db");
-            string schemaPath = Path.Combine(realBasePath, databaseName + ".sql");
+            string databasePath = Path.Combine(realBasePath, realDatabaseName + ".db");
+            string schemaPath = Path.Combine(realBasePath, realDatabaseName + ".sql");
 
             bool databaseExists = File.Exists(databasePath);
 
-            using SqliteConnection connection = new SqliteConnection(databaseConnectionString);
-            connection.Open();
+			using SqliteConnection connection = new SqliteConnection(databaseConnectionString);
+			connection.Open();
 
-            using SqliteCommand walCommand = connection.CreateCommand();
-            walCommand.CommandText = "PRAGMA journal_mode=WAL;";
-            walCommand.ExecuteNonQuery();
+			using SqliteCommand walCommand = connection.CreateCommand();
+			walCommand.CommandText = "PRAGMA journal_mode=WAL;";
+			walCommand.ExecuteNonQuery();
 
-            if (!databaseExists) {
+			if (!databaseExists) {
                 if (File.Exists(schemaPath)) {
-                    logger.WARN("Couldn't find \"" + databaseName + ".db\" at \"" + databasePath + "\", creating from \"schema.sql\"");
+                    logger.WARN("Couldn't find \"" + databaseName + ".db\" at \"" + databasePath + "\", creating from \"" + databaseName + ".sql\"");
 
-                    string schemaSql = File.ReadAllText(schemaPath);
+					string schemaSql = File.ReadAllText(schemaPath);
                     schemaSql = schemaSql.Replace("CREATE TABLE sqlite_sequence(name,seq);", "");
 
                     using SqliteCommand schemaCommand = connection.CreateCommand();
@@ -246,7 +247,7 @@ public class Program {
             } else {
                 logger.INFO("Found \"" + databaseName + ".db\" at \"" + databasePath + "\"");
 
-                using SqliteCommand schemaQuery = connection.CreateCommand();
+				using SqliteCommand schemaQuery = connection.CreateCommand();
                 schemaQuery.CommandText = "SELECT sql FROM sqlite_master WHERE sql NOT NULL AND type='table' AND name NOT LIKE 'sqlite_%';";
 
                 using SqliteDataReader reader = schemaQuery.ExecuteReader();
