@@ -1,12 +1,11 @@
 ﻿namespace kiwiapi;
 
-using Discord;
+using ImageMagick;
 using Markdig;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
-using SkiaSharp;
 using System.Data;
 using System.Data.SqlTypes;
 using System.Net;
@@ -21,6 +20,12 @@ public class FruitBowlForums {
     private readonly MarkdownPipeline markdown = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
     private readonly HttpClient client = null!;
     private readonly string? catboxHash;
+
+    private record RegisterRequest([FromForm] string username, [FromForm] string password, [FromForm] IFormFile? profilePicture);
+    private record UpdateUserRequest([FromForm] string username, [FromForm] string description, [FromForm] string signature);
+    private record NewForumRequest([FromForm] string name, [FromForm] string description);
+    private record NewTopicRequest([FromForm] string name, [FromForm] string description);
+    private record NewPostRequest([FromForm] string content, [FromForm] bool showSignature = false);
 
     public FruitBowlForums() {
         logger = new Logger("FBF");
@@ -38,12 +43,21 @@ public class FruitBowlForums {
     public void MapApiFunctions(WebApplication app) {
         RouteGroupBuilder group = app.MapGroup("/fruitbowl").RequireCors("ForumsPolicy").DisableAntiforgery();
 
-        group.MapPost("/users", async ([FromForm] string username, [FromForm] string password, [FromForm] IFormFile? profilePicture, HttpContext context) => {
+        group.MapPost("/users", async ([AsParameters] RegisterRequest request, HttpContext context) => {
+            string username = request.username;
+            string password = request.password;
+            IFormFile? profilePicture = request.profilePicture;
+
             if (username.Length < 3 || username.Length > 24) {
                 return BadRequest("Username must be between 3 and 24 characters long inclusive");
             }
             if (password.Length < 8 || password.Length > 32) {
                 return BadRequest("Password must be between 8 and 32 characters long inclusive");
+            }
+
+            if (profilePicture?.Length > 5 * 1024 * 1024) {
+                logger.INFO("Failed to register user: Profile picture exceeds size limit");
+                return BadRequest("Profile picture must be under 5MB");
             }
 
             SqlCommand queryCommand = sql.Command("SELECT COUNT(*) FROM users WHERE LOWER(username) = LOWER(@username) LIMIT 1",
@@ -68,16 +82,25 @@ public class FruitBowlForums {
                         }
                     }
 
-                    using (SKBitmap bitmap = SKBitmap.Decode(fileBytes)) {
-                        if (bitmap == null) {
-                            logger.INFO("Failed to register user: Profile picture is malformed");
-                            return BadRequest("Invalid or corrupted image file.");
+                    try {
+                        using MagickImageCollection collection = new MagickImageCollection(fileBytes);
+
+                        if (collection.Count == 0) {
+                            logger.INFO("Failed to register user: Empty image collection");
+                            return BadRequest("Invalid or corrupted image file");
                         }
 
-                        if (bitmap.Width != 512 || bitmap.Height != 512) {
-                            logger.INFO("Failed to register user: Profile picture is not 512x512");
-                            return BadRequest("Resolution does not match required resolution of 512x512.");
+                        collection.Coalesce();
+
+                        foreach (MagickImage frame in collection) {
+                            if (frame.Width != 512 || frame.Height != 512) {
+                                logger.INFO("Failed to register user: Frame resolution mismatch");
+                                return BadRequest("Resolution does not match required resolution of 512x512");
+                            }
                         }
+                    } catch (MagickException exception) {
+                        logger.INFO("Failed to register user: Profile picture is malformed: \"" + exception.Message + "\"");
+                        return BadRequest("Invalid or corrupted image file");
                     }
 
                     using ByteArrayContent content = new ByteArrayContent(fileBytes);
@@ -113,7 +136,7 @@ public class FruitBowlForums {
             );
             await command.Execute();
 
-            logger.INFO("Successfully registered new user with ID{" + userID + "} and name \"" + username + "\"");
+            logger.INFO("Successfully registered new user with ID {" + userID + "} and name \"" + username + "\"");
 
             await LoginUser(context, userID, username);
 
@@ -201,23 +224,23 @@ public class FruitBowlForums {
             });
         }).RequireAuthorization();
 
-        group.MapPut("/users/self", async (string username, string description, string signature, HttpContext context) => {
+        group.MapPut("/users/self", async ([AsParameters] UpdateUserRequest request, HttpContext context) => {
             string userID = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value!;
 
             SqlCommand command = sql.Command("UPDATE users SET username = @username, description = @description, signature = @signature WHERE id = @id",
-                ("username", username),
-                ("description", description),
-                ("signature", signature),
+                ("username", request.username),
+                ("description", request.description),
+                ("signature", request.signature),
                 ("id", userID)
             );
             await command.Execute();
 
-            await LoginUser(context, userID, username);
+            await LoginUser(context, userID, request.username);
 
             return Results.Ok();
         }).RequireAuthorization();
 
-        group.MapPut("/users/self/password", async (string password, HttpContext context) => {
+        group.MapPut("/users/self/password", async ([FromForm] string password, HttpContext context) => {
             if (password.Length < 8 || password.Length > 32) {
                 return BadRequest("Password must be between 8 and 32 characters long inclusive");
             }
@@ -328,6 +351,27 @@ public class FruitBowlForums {
             }).ToList());
         });
 
+        group.MapPost("/forums", async ([AsParameters] NewForumRequest request, HttpContext context) => {
+            if (request.name.ToLower() == "new") {
+                return BadRequest("You cannot create a topic with name \"new\"");
+            }
+
+            string userID = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value!;
+            string username = context.User.FindFirst(ClaimTypes.Name)?.Value!;
+
+            SqlCommand command = sql.Command("INSERT into FORUMS (id, name, description, creator_id) VALUES (@id, @name, @description, @creator_id)",
+                ("id", MakeUUID()),
+                ("name", request.name),
+                ("description", request.description),
+                ("creator_id", userID)
+            );
+            await command.Execute();
+
+            logger.INFO("User with ID {" + userID + "} and name \"" + username + "\" created forum with name \"" + request.name + "\"");
+
+            return Results.Ok();
+        });
+
         group.MapGet("/forums/{forum}", async (string forum, HttpContext context) => {
             SqlCommand command = sql.Command("SELECT id, description, creator_id, created_at FROM forums WHERE name = @name",
                 ("name", forum)
@@ -364,7 +408,11 @@ public class FruitBowlForums {
             }).ToList());
         });
 
-        group.MapPost("/forums/{forum}/topics", async (string forum, string name, string description, HttpContext context) => {
+        group.MapPost("/forums/{forum}/topics", async (string forum, [AsParameters] NewTopicRequest request, HttpContext context) => {
+            if (request.name.ToLower() == "new") {
+                return BadRequest("You cannot create a topic with name \"new\"");
+            }
+
             string userID = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value!;
             string username = context.User.FindFirst(ClaimTypes.Name)?.Value!;
 
@@ -373,15 +421,15 @@ public class FruitBowlForums {
             SqlCommand command = sql.Command("INSERT INTO topics (id, forum_id, name, description, creator_id) VALUES (@id, @forum_id, @name, @description, @creator_id)",
                 ("id", MakeUUID()),
                 ("forum_id", forumID!),
-                ("name", name),
-                ("description", description),
+                ("name", request.name),
+                ("description", request.description),
                 ("creator_id", userID)
             );
             await command.Execute();
 
-            logger.INFO("User with ID {" + userID + "} and name \"" + username + "\" created topic with name \"" + name + "\" in forum \"" + forum + "\"");
+            logger.INFO("User with ID {" + userID + "} and name \"" + username + "\" created topic with name \"" + request.name + "\" in forum \"" + forum + "\"");
 
-            return Results.Created("/forums/" + forum + "/topics" + name, new { });
+            return Results.Ok();
         }).RequireAuthorization();
 
         group.MapGet("/forums/{forum}/topics/{topic}/posts", async (string forum, string topic, HttpContext context) => {
@@ -438,8 +486,8 @@ public class FruitBowlForums {
             });
         });
 
-        group.MapPost("/forums/{forum}/topics/{topic}/posts", async (HttpContext context, string forum, string topic, string content, bool showSignature = false) => {
-            if (content.Length < 1 || content.Length > 10000) {
+        group.MapPost("/forums/{forum}/topics/{topic}/posts", async (string forum, string topic, [AsParameters] NewPostRequest request, HttpContext context) => {
+            if (request.content.Length < 1 || request.content.Length > 10000) {
                 return BadRequest("Content must be between 1 and 10000 characters long inclusive");
             }
 
@@ -449,8 +497,8 @@ public class FruitBowlForums {
             string? topicID = await GetTopicID(forumID!, topic);
             SqlCommand command = sql.Command("INSERT INTO posts (topic_id, content, show_signature, creator_id) VALUES (@topic_id, @content, @show_signature, @creator_id)",
                 ("topic_id", topicID!),
-                ("content", content),
-                ("show_signature", showSignature),
+                ("content", request.content),
+                ("show_signature", request.showSignature),
                 ("creator_id", userID)
             );
             await command.Execute();
