@@ -23,6 +23,7 @@ public class FruitBowlForums {
 
     private record RegisterRequest([FromForm] string username, [FromForm] string password, [FromForm] IFormFile? profilePicture);
     private record UpdateUserRequest([FromForm] string username, [FromForm] string description, [FromForm] string signature);
+    private record LoginRequest([FromForm] string username, [FromForm] string password);
     private record NewForumRequest([FromForm] string name, [FromForm] string description);
     private record NewTopicRequest([FromForm] string name, [FromForm] string description);
     private record NewPostRequest([FromForm] string content, [FromForm] bool showSignature = false);
@@ -36,7 +37,7 @@ public class FruitBowlForums {
 
         catboxHash = Environment.GetEnvironmentVariable("CATBOX_USER_HASH");
         if (catboxHash == null) {
-            logger.WARN("CATBOX_HASH environment variable is not set. Catbox uploads will not work and users will fail to register.");
+            logger.WARN("CATBOX_USER_HASH environment variable is not set. Catbox uploads will not work and users will fail to register.");
         }
     }
 
@@ -281,9 +282,9 @@ public class FruitBowlForums {
             return Results.Ok();
         }).RequireAuthorization();
 
-        group.MapPost("/auth", async (string username, string password, HttpContext context) => {
+        group.MapPost("/auth", async ([AsParameters] LoginRequest request, HttpContext context) => {
             SqlCommand command = sql.Command("SELECT id, password_hash FROM users WHERE LOWER(username) = LOWER(@username)",
-                ("username", username)
+                ("username", request.username)
             );
             List<object[]> result = await command.ExecuteGet();
             if (result.Count == 0) {
@@ -292,13 +293,13 @@ public class FruitBowlForums {
             }
             string userID = (string)result[0][0];
             string storedPasswordHash = (string)result[0][1];
-            if (!VerifyHashedString(password, storedPasswordHash)) {
+            if (!VerifyHashedString(request.password, storedPasswordHash)) {
                 logger.INFO("Failed to log in user: Incorrect password");
                 return Unauthorized("Invalid username or password");
             }
 
             logger.INFO("Successfully logged in user with ID {" + userID + "}");
-            await LoginUser(context, userID, username);
+            await LoginUser(context, userID, request.username);
 
             return Results.Ok();
         });

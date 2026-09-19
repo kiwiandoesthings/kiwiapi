@@ -25,8 +25,7 @@ public class ProtocallApi {
         this.sql = sql;
 
         if (catboxHash == null) {
-            logger.WARN("Could not find environment variable \"CATBOX_USER_HASH\"");
-            return;
+            logger.WARN("CATBOX_USER_HASH environment variable is not set. Catbox uploads will not work and users will fail to register.");
         }
 
         handler = new SocketsHttpHandler() {
