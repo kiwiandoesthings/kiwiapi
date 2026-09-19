@@ -211,7 +211,7 @@ public class FruitBowlForums {
             );
             List<object[]> result = await command.ExecuteGet();
             if (result.Count == 0) {
-                logger.ERR("User with ID \"" + userID + "\" was not found");
+                logger.ERR("User with ID \"" + userID + "\" was not found on a /self method");
                 return NotFound("User not found");
             }
 
@@ -378,6 +378,7 @@ public class FruitBowlForums {
             );
             List<object[]> result = await command.ExecuteGet();
             if (result.Count == 0) {
+                logger.INFO("Tried to get forum with name \"" + forum + "\", that doesn't exist");
                 return NotFound("Forum not found");
             }
 
