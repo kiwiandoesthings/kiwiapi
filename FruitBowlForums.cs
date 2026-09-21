@@ -442,6 +442,16 @@ public class FruitBowlForums {
 
             string? forumID = await GetForumID(forum);
             string? topicID = await GetTopicID(forumID!, topic);
+
+            SqlCommand existsCommand = sql.Command("SELECT COUNT(*) FROM topics WHERE id = @id AND forum_id = @forum_id LIMIT 1",
+                ("id", topicID!),
+                ("forum_id", forumID!)
+            );
+            int? rows = (int?)await existsCommand.ExecuteGetScalar();
+            if (rows == 0) {
+                return NotFound("That forum or topic does not exist");
+            }
+
             SqlCommand command = sql.Command("SELECT post.id, post.content, post.show_signature, post.deleted, post.creator_id, post.created_at, user.id, user.username, user.description, user.signature, user.profile_picture_url, user.created_at FROM posts post LEFT JOIN users user ON post.creator_id = user.id WHERE post.topic_id = @topic_id ORDER BY post.id ASC", 
                 ("topic_id", topicID!)
             );

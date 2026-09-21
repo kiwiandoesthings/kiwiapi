@@ -94,7 +94,7 @@ public class Program {
         app.UseAntiforgery();
         app.MapOpenApi();
 
-        app.MapGet("/", () => Results.Ok("KiwiApi v1.2"));
+        app.MapGet("/", () => Results.Ok("KiwiApi v1.3"));
 
         Ao3Api ao3 = new Ao3Api();
         ao3.MapApiFunctions(app);
