@@ -447,7 +447,7 @@ public class FruitBowlForums {
                 ("id", topicID!),
                 ("forum_id", forumID!)
             );
-            int? rows = (int?)await existsCommand.ExecuteGetScalar();
+            int rows = Convert.ToInt32(await existsCommand.ExecuteGetScalar());
             if (rows == 0) {
                 return NotFound("That forum or topic does not exist");
             }
