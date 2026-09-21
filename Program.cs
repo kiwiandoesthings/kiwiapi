@@ -250,8 +250,8 @@ public class Program {
             } else {
                 logger.INFO("Found \"" + databaseName + ".db\" at \"" + databasePath + "\"");
 
-				using SqliteCommand schemaQuery = connection.CreateCommand();
-                schemaQuery.CommandText = "SELECT sql FROM sqlite_master WHERE sql NOT NULL AND type='table' AND name NOT LIKE 'sqlite_%';";
+                using SqliteCommand schemaQuery = connection.CreateCommand();
+                schemaQuery.CommandText = "SELECT sql FROM sqlite_master WHERE sql NOT NULL AND type IN ('table', 'trigger', 'view') AND name NOT LIKE 'sqlite_%';";
 
                 using SqliteDataReader reader = schemaQuery.ExecuteReader();
                 List<string> statements = [];
