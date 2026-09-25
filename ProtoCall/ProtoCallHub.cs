@@ -10,9 +10,9 @@ using System.Text.RegularExpressions;
 using static Program;
 
 public class ProtoCallHub : Hub {
-	private static readonly Logger logger = new Logger("PTC");
+	private static readonly Logger logger = new Logger("PCH");
     private static SqlInterface sql = null!;
-	private static ProtocallApi api = null!;
+	private static ProtoCallApi api = null!;
 
     public static readonly ConcurrentDictionary<string, bool> userConnections = new();
 	public static readonly string? catboxHash = Environment.GetEnvironmentVariable("CATBOX_USER_HASH");
@@ -23,7 +23,7 @@ public class ProtoCallHub : Hub {
 	public static void Setup(WebApplication app) {
         sql = new SqlInterface("protocall");
 
-        api = new ProtocallApi(logger, catboxHash, sql);
+        api = new ProtoCallApi(catboxHash, sql);
 
 		api.MapApiFunctions(app);
     }

@@ -1,7 +1,6 @@
  namespace kiwiapi;
 
 using kiwiapi.ProtoCall;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.Data.Sqlite;
 using System.Text;
 
@@ -42,6 +41,15 @@ public class Program {
             });
 
             options.AddPolicy("ForumsPolicy", policy => {
+                policy.SetIsOriginAllowed(origin => {
+                    return new Uri(origin).Host.EndsWith(".kiwiandoesthings.place");
+                });
+                policy.AllowAnyMethod();
+                policy.AllowAnyHeader();
+                policy.AllowCredentials();
+            });
+
+            options.AddPolicy("FruitbowlPolicy", policy => {
                 policy.SetIsOriginAllowed(origin => {
                     return new Uri(origin).Host.EndsWith(".kiwiandoesthings.place");
                 });
@@ -94,7 +102,10 @@ public class Program {
         app.UseAntiforgery();
         app.MapOpenApi();
 
-        app.MapGet("/", () => Results.Ok("KiwiApi v1.3"));
+        app.MapGet("/", () => Results.Ok("KiwiApi v1.4"));
+
+        Users users = new Users();
+        users.MapApiFunctions(app);
 
         Ao3Api ao3 = new Ao3Api();
         ao3.MapApiFunctions(app);
@@ -103,11 +114,12 @@ public class Program {
         miscellaneous.MapApiFunctions(app);
 
         ProtoCallHub.Setup(app);
+        ProtoCallApi protoCallApi = new ProtoCallApi();
 
 		KiwiBlogApi kiwiBlog = new KiwiBlogApi();
         kiwiBlog.MapApiFunctions(app);
 
-        FruitBowlForums forums = new FruitBowlForums();
+        FruitBowlForums forums = new FruitBowlForums(users);
         forums.MapApiFunctions(app);
 
         app.MapHub<ProtoCallHub>("/protocall/connect");
@@ -190,22 +202,8 @@ public class Program {
             return await command.ExecuteScalarAsync();
         }
 
-        public async Task<List<object[]>> ExecuteGet() {
-            using SqliteDataReader reader = await command.ExecuteReaderAsync();
-            List<object[]> rows = [];
-            while (await reader.ReadAsync()) {
-                object[] row = new object[reader.FieldCount];
-                for (int iterator = 0; iterator < reader.FieldCount; iterator++) {
-                    if (reader.IsDBNull(iterator)) {
-                        Console.WriteLine("Got null value from expression: " + command.CommandText);
-                        row[iterator] = "";
-                    } else {
-                        row[iterator] = reader.GetValue(iterator);
-                    }
-                }
-                rows.Add(row);
-            }
-            return rows;
+        public async Task<SqliteDataReader> ExecuteGet() {
+            return await command.ExecuteReaderAsync();
         }
 
         public void Dispose() {

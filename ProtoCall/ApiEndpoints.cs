@@ -10,7 +10,7 @@ using System.Security.Claims;
 using static Program;
 using static ProtoCallHub;
 
-public class ProtocallApi {
+public class ProtoCallApi {
     private static readonly string[] allowedMimeTypes = { "image/jpeg", "image/png", "image/gif" };
 
     private readonly Logger logger;
@@ -19,8 +19,8 @@ public class ProtocallApi {
     private readonly SocketsHttpHandler handler = null!;
     private readonly HttpClient client = null!;
 
-    public ProtocallApi(Logger logger, string? catboxHash, SqlInterface sql) {
-        this.logger = logger;
+    public ProtoCallApi(string? catboxHash, SqlInterface sql) {
+        logger = new Logger("PCA");
         this.catboxHash = catboxHash;
         this.sql = sql;
 

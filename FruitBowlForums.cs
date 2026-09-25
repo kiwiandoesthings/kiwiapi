@@ -12,14 +12,16 @@ using System.Net;
 using System.Reflection.Metadata;
 using System.Security.Claims;
 
+using Microsoft.Data.Sqlite;
+
+using static Users;
 using static Program;
 
 public class FruitBowlForums {
     private readonly Logger logger;
     private readonly SqlInterface sql;
+    private readonly Users users;
     private readonly MarkdownPipeline markdown = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
-    private readonly HttpClient client = null!;
-    private readonly string? catboxHash;
 
     private record RegisterRequest([FromForm] string username, [FromForm] string password, [FromForm] IFormFile? profilePicture);
     private record UpdateUserRequest([FromForm] string username, [FromForm] string description, [FromForm] string signature);
@@ -28,122 +30,19 @@ public class FruitBowlForums {
     private record NewTopicRequest([FromForm] string name, [FromForm] string description);
     private record NewPostRequest([FromForm] string content, [FromForm] bool showSignature = false);
 
-    public FruitBowlForums() {
+    public FruitBowlForums(Users users) {
+        this.users = users;
         logger = new Logger("FBF");
         sql = new SqlInterface("fruitbowlforums");
-
-        client = new HttpClient();
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("FruitBowlForums/1.0");
-
-        catboxHash = Environment.GetEnvironmentVariable("CATBOX_USER_HASH");
-        if (catboxHash == null) {
-            logger.WARN("CATBOX_USER_HASH environment variable is not set. Catbox uploads will not work and users will fail to register.");
-        }
     }
 
     public void MapApiFunctions(WebApplication app) {
         RouteGroupBuilder group = app.MapGroup("/fruitbowl").RequireCors("ForumsPolicy").DisableAntiforgery();
 
         group.MapPost("/users", async ([AsParameters] RegisterRequest request, HttpContext context) => {
-            string username = request.username;
-            string password = request.password;
-            IFormFile? profilePicture = request.profilePicture;
+            AuthResult result = await users.RegisterUser(request.username, request.password, request.profilePicture, context);
 
-            if (username.Length < 3 || username.Length > 24) {
-                return BadRequest("Username must be between 3 and 24 characters long inclusive");
-            }
-            if (password.Length < 8 || password.Length > 32) {
-                return BadRequest("Password must be between 8 and 32 characters long inclusive");
-            }
-
-            if (profilePicture?.Length > 5 * 1024 * 1024) {
-                logger.INFO("Failed to register user: Profile picture exceeds size limit");
-                return BadRequest("Profile picture must be under 5MB");
-            }
-
-            SqlCommand queryCommand = sql.Command("SELECT COUNT(*) FROM users WHERE LOWER(username) = LOWER(@username) LIMIT 1",
-                ("username", username)
-            );
-            int rows = Convert.ToInt32(await queryCommand.ExecuteGetScalar());
-            if (rows > 0) {
-                logger.INFO("Failed to register user: Username is already in use");
-                return BadRequest("That username is already in use");
-            }
-
-            string userID = MakeUUID();
-
-            string profilePictureUrl = "";
-            if (profilePicture != null) {
-                byte[] fileBytes;
-                try {
-                    using (Stream incomingStream = profilePicture.OpenReadStream()) {
-                        using (MemoryStream memoryStream = new MemoryStream()) {
-                            await incomingStream.CopyToAsync(memoryStream);
-                            fileBytes = memoryStream.ToArray();
-                        }
-                    }
-
-                    try {
-                        using MagickImageCollection collection = new MagickImageCollection(fileBytes);
-
-                        if (collection.Count == 0) {
-                            logger.INFO("Failed to register user: Empty image collection");
-                            return BadRequest("Invalid or corrupted image file");
-                        }
-
-                        collection.Coalesce();
-
-                        foreach (MagickImage frame in collection) {
-                            if (frame.Width != 512 || frame.Height != 512) {
-                                logger.INFO("Failed to register user: Frame resolution mismatch");
-                                return BadRequest("Resolution does not match required resolution of 512x512");
-                            }
-                        }
-                    } catch (MagickException exception) {
-                        logger.INFO("Failed to register user: Profile picture is malformed: \"" + exception.Message + "\"");
-                        return BadRequest("Invalid or corrupted image file");
-                    }
-
-                    using ByteArrayContent content = new ByteArrayContent(fileBytes);
-                    content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(profilePicture.ContentType);
-
-                    using MultipartFormDataContent uploadRequest = new MultipartFormDataContent();
-                    uploadRequest.Add(new StringContent("fileupload"), "reqtype");
-                    uploadRequest.Add(content, "fileToUpload", "forums_profile_picture_" + userID.ToString() + Path.GetExtension(profilePicture.FileName));
-                    uploadRequest.Add(new StringContent(catboxHash!), "userhash");
-                    using HttpResponseMessage response = await client!.PostAsync("https://catbox.moe/user/api.php", uploadRequest);
-
-                    if (!response.IsSuccessStatusCode) {
-                        logger.ERR("Failed to register user: Profile picture failed to upload");
-                        return ServerError("Failed to upload profile picture to file host service. Please try again.");
-                    }
-
-                    profilePictureUrl = await response.Content.ReadAsStringAsync();
-                } catch (Exception error) {
-                    logger.ERR("Failed to register user: Error while processing profile picture: \"" + error.ToString() + "\"");
-                    return ServerError("Failed to process uploaded profile picture. Please try again. If the issue persists, please contact KiwianDoesThings with your profile picture (You can see my contact info on my main website \"kiwiandoesthings.place\"");
-                }
-            }
-
-            string passwordHash = GetHashedString(password);
-
-            SqlCommand command = sql.Command("INSERT INTO users (id, username, password_hash, profile_picture_url, description, signature) VALUES (@id, @username, @password_hash, @profile_picture_url, @description, @signature)", 
-                ("id", userID),
-                ("username", username),
-                ("password_hash", passwordHash),
-                ("profile_picture_url", profilePictureUrl),
-                ("description", ""),
-                ("signature", "")
-            );
-            await command.Execute();
-
-            logger.INFO("Successfully registered new user with ID {" + userID + "} and name \"" + username + "\"");
-
-            await LoginUser(context, userID, username);
-
-            return Results.Ok(new {
-                id = userID
-            });
+            return result.result;
         });
 
         group.MapGet("/users/{userID}", async (string userID) => {
@@ -170,19 +69,19 @@ public class FruitBowlForums {
             SqlCommand command = sql.Command("SELECT id, profile_picture_url, description, signature, created_at FROM users WHERE LOWER(username) = LOWER(@username)",
                 ("username", username)
             );
-            List<object[]> result = await command.ExecuteGet();
-            if (result.Count == 0) {
+            SqliteDataReader reader = await command.ExecuteGet();
+            if (!reader.HasRows) {
                 logger.INFO("User with username \"" + username + "\" was not found");
                 return NotFound("User not found");
             }
 
             return Results.Ok(new {
-                id = (string)result[0][0],
+                id = reader.GetString(0),
                 username = username,
-                profile_picture_url = (string)result[0][1],
-                description = (string)result[0][2],
-                signature = (string)result[0][3],
-                created_at = (string)result[0][4]
+                profile_picture_url = reader.GetString(0),
+                description = reader.GetString(2),
+                signature = reader.GetString(3),
+                created_at = reader.GetString(4)
             });
         });
 
@@ -223,105 +122,6 @@ public class FruitBowlForums {
                 description = (string)result[0][2],
                 signature = (string)result[0][3]
             });
-        }).RequireAuthorization();
-
-        group.MapPut("/users/self", async ([AsParameters] UpdateUserRequest request, HttpContext context) => {
-            string userID = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value!;
-
-            SqlCommand command = sql.Command("UPDATE users SET username = @username, description = @description, signature = @signature WHERE id = @id",
-                ("username", request.username),
-                ("description", request.description),
-                ("signature", request.signature),
-                ("id", userID)
-            );
-            await command.Execute();
-
-            await LoginUser(context, userID, request.username);
-
-            return Results.Ok();
-        }).RequireAuthorization();
-
-        group.MapPut("/users/self/password", async ([FromForm] string password, HttpContext context) => {
-            if (password.Length < 8 || password.Length > 32) {
-                return BadRequest("Password must be between 8 and 32 characters long inclusive");
-            }
-
-            string userID = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value!;
-
-            SqlCommand queryPasswordCommand = sql.Command("SELECT password_hash FROM users WHERE id = @id",
-                ("id", userID)
-            );
-            string oldPasswordHash = queryPasswordCommand.ExecuteGet().Result[0][0].ToString()!;
-
-            if (VerifyHashedString(password, oldPasswordHash)) {
-                return BadRequest("New password cannot be the same as the old password");
-            }
-
-            string passwordHash = GetHashedString(password);
-
-            SqlCommand command = sql.Command("UPDATE users SET password_hash = @password_hash WHERE id = @id",
-                ("password_hash", passwordHash),
-                ("id", userID)
-            );
-
-            await command.Execute();
-
-            return Results.Ok();
-        }).RequireAuthorization();
-
-        group.MapDelete("/users/self", async (HttpContext context) => {
-            string userID = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value!;
-
-            SqlCommand command = sql.Command("DELETE FROM users WHERE id = @id",
-                ("id", userID)
-            );
-            await command.Execute();
-
-            await LogoutUser(context);
-
-            return Results.Ok();
-        }).RequireAuthorization();
-
-        group.MapPost("/auth", async ([AsParameters] LoginRequest request, HttpContext context) => {
-            SqlCommand command = sql.Command("SELECT id, password_hash FROM users WHERE LOWER(username) = LOWER(@username)",
-                ("username", request.username)
-            );
-            List<object[]> result = await command.ExecuteGet();
-            if (result.Count == 0) {
-                logger.INFO("Failed to log in user: No user with that username");
-                return Unauthorized("Invalid username or password");
-            }
-            string userID = (string)result[0][0];
-            string storedPasswordHash = (string)result[0][1];
-            if (!VerifyHashedString(request.password, storedPasswordHash)) {
-                logger.INFO("Failed to log in user: Incorrect password");
-                return Unauthorized("Invalid username or password");
-            }
-
-            logger.INFO("Successfully logged in user with ID {" + userID + "}");
-            await LoginUser(context, userID, request.username);
-
-            return Results.Ok();
-        });
-
-        group.MapGet("/auth", async (HttpContext context) => {
-            if (context.User.Identity?.IsAuthenticated == true) {
-                string? username = context.User.FindFirst(ClaimTypes.Name)?.Value;
-                return Results.Ok(new { 
-                    loggedIn = true, 
-                    username = username 
-                });
-            }
-
-            return Results.Ok(new {
-                loggedIn = false
-            });
-        });
-
-        group.MapDelete("/auth", async (HttpContext context) => {
-            await LogoutUser(context);
-
-            return Results.Ok();
         }).RequireAuthorization();
 
         group.MapGet("/forums", async (string? forum, HttpContext context) => {
@@ -576,35 +376,6 @@ public class FruitBowlForums {
             //await command.Execute();
             //return Results.Ok();
         }).RequireAuthorization();
-    }
-
-    public async Task LoginUser(HttpContext context, string userID, string username) {
-        List<Claim> claims = [
-            new Claim(ClaimTypes.NameIdentifier, userID),
-            new Claim(ClaimTypes.Name, username)
-        ];
-
-        var claimsIdentity = new ClaimsIdentity(claims, "FruitBowlAuth");
-        await context.SignInAsync("FruitBowlAuth", new ClaimsPrincipal(claimsIdentity));
-
-        context.Response.Cookies.Append("fruitbowl_user_id", userID, new CookieOptions {
-            Domain = isDebug ? ".test.kiwiandoesthings.place" : ".kiwiandoesthings.place",
-            HttpOnly = false,
-            Secure = !isDebug,
-            SameSite = SameSiteMode.Lax,
-            Expires = DateTimeOffset.UtcNow.AddDays(365)
-        });
-        context.Response.Cookies.Append("fruitbowl_username", username, new CookieOptions {
-            Domain = isDebug ? ".test.kiwiandoesthings.place" : ".kiwiandoesthings.place",
-            HttpOnly = false,
-            Secure = !isDebug,
-            SameSite = SameSiteMode.Lax,
-            Expires = DateTimeOffset.UtcNow.AddDays(365)
-        });
-    }
-
-    public async Task LogoutUser(HttpContext context) {
-        await context.SignOutAsync("FruitBowlAuth");
     }
 
     public async Task<string?> GetForumID(string forumName) {
