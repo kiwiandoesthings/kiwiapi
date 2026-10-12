@@ -1,26 +1,38 @@
-﻿namespace kiwiapi;
+﻿namespace KiwiApi.Bot;
 
 using Discord;
 using Discord.WebSocket;
 using Discord.Interactions;
 using Microsoft.Extensions.Hosting;
 
-public class Bot : BackgroundService {
+public class BotHandler : BackgroundService {
+    private readonly Logger logger;
     private readonly DiscordSocketClient client;
     private readonly InteractionService commands;
     private readonly IServiceProvider services;
+    private readonly string? botToken;
 
-    public Bot(IServiceProvider services) {
-        this.services = services;
+    public BotHandler(IServiceProvider services) {
+        logger = new Logger("PSMP");
         DiscordSocketConfig config = new DiscordSocketConfig {
             GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent,
         };
         client = new DiscordSocketClient(config);
+        client.MessageReceived += BotModule.MessageSent;
         commands = new InteractionService(client);
+        this.services = services;
+        botToken = Environment.GetEnvironmentVariable("KIWIAPI_DISCORD_BOT_TOKEN");
+        if (botToken == null) {
+            logger.WARN("KIWIAPI_DISCORD_BOT_TOKEN environment variable is not set. Disabling PSMP bot module");
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
-        await commands.AddModuleAsync<PsmpModule>(services);
+        if (botToken == null) {
+            return;
+        }
+
+        await commands.AddModuleAsync<BotModule>(services);
 
         client.Ready += async () => {
             await commands.RegisterCommandsGloballyAsync();
@@ -31,7 +43,7 @@ public class Bot : BackgroundService {
             await commands.ExecuteCommandAsync(ctx, services);
         };
 
-        await client.LoginAsync(TokenType.Bot, "MTUyMTI1OTcyMzczMzg2MDM1Mw.GGPG8O._jMrRPsJlL-WKo30yPgUZSn6ZJp9oEmAGYS24I");
+        await client.LoginAsync(TokenType.Bot, botToken);
         await client.StartAsync();
 
         await Task.Delay(Timeout.Infinite, stoppingToken);

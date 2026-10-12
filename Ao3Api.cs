@@ -1,4 +1,4 @@
-namespace kiwiapi;
+namespace KiwiApi;
 
 using System.Diagnostics;
 using System.Text;
@@ -6,7 +6,7 @@ using System.Text;
 using static Program;
 
 public class Ao3Api {
-	private Logger logger = new Logger("Ao3");
+	private readonly Logger logger = new Logger("Ao3");
 
     public void MapApiFunctions(WebApplication app) {
 		app.MapGet("/getao3storyid", async (HttpContext context, string storyTitle, int page) => {

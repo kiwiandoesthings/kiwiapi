@@ -1,4 +1,4 @@
-﻿namespace kiwiapi;
+﻿namespace KiwiApi;
 
 using System;
 using System.Runtime.CompilerServices;
@@ -6,45 +6,45 @@ using System.Runtime.CompilerServices;
 public class Logger {
     public static readonly Dictionary<string, string> logColors = new() {
         {"DEBUG", "\u001b[1;34m"},
-        {"INFO", "\u001b[1;32m"},
-        {"EXTERNAL", "\u001b[1;38;5;226m"},
-        {"WARN", "\u001b[1;38;5;214m"},
+        {"INFO ", "\u001b[1;32m"},
+        {"EXTRN", "\u001b[1;38;5;226m"},
+        {"WARN ", "\u001b[1;38;5;214m"},
         {"ERROR", "\u001b[1;31m"},
-        {"CRITICAL", "\u001b[1;41m"},
+        {"CRTCL", "\u001b[1;41m"},
         {"RESET", "\u001b[0m"},
         {"SRCLOC", "\u001b[1;30m"},
         {"FUNCTION", "\u001b[1;35m"}
     };
-    public static readonly string[] levelStrings = new string[] {
+    public static readonly string[] levelStrings = [
         "DEBUG",
-        "INFO",
-        "EXTERNAL",
-        "WARN",
+        "INFO ",
+        "EXTRN",
+        "WARN ",
         "ERROR",
-        "CRITICAL",
+        "CRTCL",
         "OFF"
-    };
+    ];
     public static readonly Logger shared = new Logger("General");
     public readonly string logName;
-    private static string headerStructure = "[{level} | {function}]";
+    private static readonly string headerStructure = "[{level} | {function}]";
 
     public Logger(string logName) {
         this.logName = logName;
     }
 
-    public void INFO(string message, [CallerMemberName] string sourceFunction = "Invalid", [CallerFilePath] string sourceFile = "Invalid", [CallerLineNumber] int sourceLine = -1) {
+    public void INFO(string message) {
         WriteMessage(LogLevel.Info, message);
     }
 
-    public void WARN(string message, [CallerMemberName] string sourceFunction = "Invalid", [CallerFilePath] string sourceFile = "Invalid", [CallerLineNumber] int sourceLine = -1) {
+    public void WARN(string message) {
         WriteMessage(LogLevel.Warn, message);
     }
 
-    public void ERR(string message, [CallerMemberName] string sourceFunction = "Invalid", [CallerFilePath] string sourceFile = "Invalid", [CallerLineNumber] int sourceLine = -1) {
+    public void ERR(string message) {
         WriteMessage(LogLevel.Error, message);
     }
 
-    public void CRITICAL(string message, [CallerMemberName] string sourceFunction = "Invalid", [CallerFilePath] string sourceFile = "Invalid", [CallerLineNumber] int sourceLine = -1) {
+    public void CRITICAL(string message) {
         WriteMessage(LogLevel.Critical, message);
     }
 
